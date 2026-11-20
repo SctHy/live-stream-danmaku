@@ -19,7 +19,7 @@ import (
 
 // Job structure
 type BroadcastJob struct {
-	Clients []*Client // The slice obtained from Pool
+	Clients []*Client // Immutable recipient snapshot.
 	Payload []byte
 }
 
@@ -40,6 +40,8 @@ type Manager struct {
 
 	// Rooms: Map of RoomID -> Set of Clients
 	Rooms map[string]map[*Client]struct{}
+	// Immutable snapshots guarded by mu. Membership changes invalidate the room entry.
+	snapshots map[string][]*Client
 
 	//Store cancel functions to stop Redis subscriptions
 	cancelSub map[string]context.CancelFunc
@@ -50,8 +52,6 @@ type Manager struct {
 	//RLock() when multiple routines read room map to broadcast simultaneously,
 	//non blocking
 
-	// Reducing GC pressure by avoiding frequent make([]*Client).
-	clientPool sync.Pool
 	// Channel to distribute broadcast tasks to background workers
 	broadcastJobChan chan *BroadcastJob
 
@@ -68,7 +68,6 @@ type Manager struct {
 
 const (
 	BroadCastInterVal    = 3 * time.Second
-	InitClientPoolCap    = 500
 	BroadcastChanSize    = 1024
 	BroadcastJobChanSize = 1000
 	WorkerCount          = 100
@@ -92,13 +91,7 @@ func NewManager() *Manager {
 		localLikes: make(map[string]uint64),
 		Rooms:      make(map[string]map[*Client]struct{}),
 		cancelSub:  make(map[string]context.CancelFunc),
-		clientPool: sync.Pool{
-			New: func() interface{} {
-				// Pre-allocate a reasonable capacity
-				// It will grow automatically if needed.
-				return make([]*Client, 0, InitClientPoolCap)
-			},
-		},
+		snapshots:  make(map[string][]*Client),
 		// Initialize Job Channel
 		broadcastJobChan: make(chan *BroadcastJob, BroadcastJobChanSize),
 		RedisClient:      rdb,
@@ -146,9 +139,6 @@ func (m *Manager) broadcastWorker() {
 			m.safeSend(client, job.Payload)
 		}
 
-		// 2. Return the slice to the Pool HERE
-		// The worker is responsible for cleanup
-		m.clientPool.Put(job.Clients)
 	}
 }
 
@@ -192,6 +182,7 @@ func (m *Manager) handleRegister(client *Client) {
 
 	//struct{} is type,second {} is initializing instance
 	m.Rooms[client.RoomID][client] = struct{}{}
+	delete(m.snapshots, client.RoomID)
 
 	// Async Redis update: Online Count
 	// because Incr involves network I/O,TCP round trip,queue in redis,
@@ -210,6 +201,7 @@ func (m *Manager) handleUnregister(client *Client) {
 	if clients, ok := m.Rooms[client.RoomID]; ok {
 		if _, ok := clients[client]; ok {
 			delete(clients, client)
+			delete(m.snapshots, client.RoomID)
 			// Do NOT close(client.Send) here if workers are still using it.
 			// close(client.Send)
 			client.Close()
@@ -396,48 +388,41 @@ func (m *Manager) subscribeToRoom(ctx context.Context, roomID string) {
 	}
 }
 
-// broadcastToLocalClients sends raw bytes to all clients in a specific room.
-func (m *Manager) broadcastToLocalClients(roomID string, payload []byte) {
-	//read lock
+// roomSnapshot reuses a read-only recipient list until the room membership changes.
+// Jobs already queued can finish using the previous snapshot.
+func (m *Manager) roomSnapshot(roomID string) []*Client {
 	m.mu.RLock()
-	clients, ok := m.Rooms[roomID]
-	if !ok {
-		m.mu.RUnlock()
+	snapshot := m.snapshots[roomID]
+	m.mu.RUnlock()
+	if snapshot != nil {
+		return snapshot
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if snapshot = m.snapshots[roomID]; snapshot != nil {
+		return snapshot
+	}
+	clients := m.Rooms[roomID]
+	if len(clients) == 0 {
+		return nil
+	}
+	snapshot = make([]*Client, 0, len(clients))
+	for client := range clients {
+		snapshot = append(snapshot, client)
+	}
+	m.snapshots[roomID] = snapshot
+	return snapshot
+}
+
+func (m *Manager) broadcastToLocalClients(roomID string, payload []byte) {
+	clients := m.roomSnapshot(roomID)
+	if len(clients) == 0 {
 		return
 	}
-	// Get from pool
-	targetClients := m.clientPool.Get().([]*Client)
-	targetClients = targetClients[:0] // Reset length
-	for c := range clients {
-		targetClients = append(targetClients, c)
-	}
-	m.mu.RUnlock()
-
-	job := &BroadcastJob{
-		Clients: targetClients,
-		Payload: payload,
-	}
-	// 4. Non-blocking Dispatch to Workers
 	select {
-	case m.broadcastJobChan <- job:
-		// Success: Worker will handle it
+	case m.broadcastJobChan <- &BroadcastJob{Clients: clients, Payload: payload}:
 	default:
-		// Failsafe: If workers are too slow, we must drop the job
-		// and return the slice to pool immediately to prevent leak
 		logger.Log.Warn("[MANAGER] Broadcast job queue full, dropping message", zap.String("room", roomID))
-		m.clientPool.Put(targetClients)
 	}
-	// Sending to clients outside of Global Lock
-	// for _, client := range targetClients {
-	// 	select {
-	// 	case client.Send <- payload:
-	// 	default:
-	// 		// FIX: Do NOT modify the map (delete) inside RLock.
-	// 		// Instead, just close the channel and let WritePump handle the error
-	// 		// delete(clients, client)
-	// 		logger.Log.Warn("[MANAGER] Client buffer full, skipping message",
-	// 			zap.Uint64("uid", client.UserID),
-	// 		)
-	// 	}
-	// }
 }
