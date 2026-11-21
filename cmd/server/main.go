@@ -1,82 +1,82 @@
 package main
 
 import (
-	"flag" // command line arguments
+	"context"
+	"errors"
+	"flag"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/charlesAcmen/livestream-danmaku/internal/api"
 	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
 	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
 	"github.com/charlesAcmen/livestream-danmaku/internal/repo"
-	"github.com/charlesAcmen/livestream-danmaku/internal/service"
 	"github.com/charlesAcmen/livestream-danmaku/internal/ws"
-	"github.com/gin-gonic/gin" // Gin is a web framework for Go.
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
 func main() {
-	// 1. Initialize Logger
-	// Use "dev" for colored output, "prod" for JSON.
-	logger.InitLogger("dev")
+	logger.InitLogger("prod")
 	defer logger.Sync()
-
-	// Define command-line flag for port. Default is 8080.
-	// port is argument name,8080 is default value, "server port" is help message
-	// port is in *string type
-	port := flag.String("port", "8080", "server port")
-	//resolve arguments,port is given value
-	capacity := flag.Int("send-queue", ws.SendChanSize, "maximum frames buffered per connection")
-	window := flag.Duration("batch-window", 5*time.Millisecond, "maximum hot-room coalescing delay; zero sends immediately")
-	minViewers := flag.Int("batch-min-viewers", 128, "minimum batch-capable viewers per room")
-	prepared := flag.Bool("prepared", false, "share WebSocket frames across recipients")
+	host := flag.String("host", "127.0.0.1", "listen address")
+	port := flag.String("port", "8080", "HTTP port")
+	capacity := flag.Int("send-queue", ws.SendChanSize, "maximum frames per connection")
+	window := flag.Duration("batch-window", 5*time.Millisecond, "maximum hot-room coalescing delay")
+	minViewers := flag.Int("batch-min-viewers", 128, "minimum batch-capable viewers")
+	prepared := flag.Bool("prepared", false, "share prepared frames")
+	shards := flag.Int("room-shards", ws.RoomShards, "number of room workers")
 	flag.Parse()
-	if *minViewers < 1 {
-		logger.Log.Fatal("batch-min-viewers must be positive")
+	if *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 {
+		logger.Log.Fatal("invalid fanout configuration")
 	}
-	if *window < 0 {
-		logger.Log.Fatal("batch-window must be nonnegative")
-	}
-	if *capacity < 1 {
-		logger.Log.Fatal("send-queue must be positive")
-	}
-	logger.Log.Info("[SERVER]Starting server...", zap.String("port", *port))
-
-	//IMPORTANT:
-	//initialize Global WebSocket Handlers
-	//logic handler functions[Danmaku,Like,Broadcast stats]
-	ws.RegisterActionHandlers()
-
-	// 1. Init DB (Shared by all layers)
 	db := infra.InitDB()
 	defer db.Close()
-	// 2. Init Layers (Dependency Injection)
-	// Repo -> Service -> Handler
-	messageRepo := repo.NewMessageRepo(db)
-	chatService := service.NewChatService(messageRepo)
-	// 3. Init WebSocket Manager
-	manager := ws.NewManager(*capacity)
-	manager.MinBatchViewers = *minViewers
-	manager.Prepared = *prepared
-	manager.BatchWindow = *window
-	go manager.Start()
-
-	// 4. Setup API Handlers (Dependency Injection)
-	// We pass the manager and service into the handler.
-	chatHandler := api.NewChatHandler(chatService, manager)
-
-	// 4. Init Router
-	// r := gin.Default()
-	//blank slate
+	ws.RegisterActionHandlers()
+	m := ws.NewManager(*capacity, *shards)
+	m.BatchWindow = *window
+	m.MinBatchViewers = *minViewers
+	m.Prepared = *prepared
+	go m.Start()
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	// Manually attach Recovery middleware (Critical for preventing server crash on panic)
 	r.Use(gin.Recovery())
-
-	// WebSocket Route
-	r.GET("/ws", chatHandler.ConnectWebSocket)
-
-	addr := ":" + *port
-	if err := r.Run(addr); err != nil {
-		logger.Log.Fatal("[SERVER]Server startup failed", zap.Error(err))
+	api.NewChatHandler(repo.NewMessageRepo(db), m).Routes(r)
+	r.GET("/livez", func(c *gin.Context) { c.Status(200) })
+	r.GET("/readyz", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+		defer cancel()
+		if err := m.RedisClient.Ping(ctx).Err(); err != nil {
+			c.Status(503)
+			return
+		}
+		if err := db.Ping(ctx); err != nil {
+			c.Status(503)
+			return
+		}
+		c.Status(200)
+	})
+	r.GET("/metrics", func(c *gin.Context) { c.JSON(200, m.Metrics()) })
+	srv := http.Server{Addr: net.JoinHostPort(*host, *port), Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	done := make(chan error, 1)
+	go func() { done <- srv.ListenAndServe() }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, http.ErrServerClosed) {
+			logger.Log.Fatal("HTTP listener", zap.Error(err))
+		}
+	case <-ctx.Done():
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdown)
+		if err := m.Drain(shutdown); err != nil {
+			logger.Log.Warn("Drain timed out", zap.Error(err))
+		}
 	}
-	logger.Log.Info("[SERVER]Server listening", zap.String("address", addr))
 }

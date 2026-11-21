@@ -90,8 +90,28 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 			if err != nil || len(rows) != 1 || rows[0].Content != "now" {
 				t.Fatalf("playback %v %v", rows, err)
 			}
+			offset := int64(1000)
+			for _, id := range []string{"visible", "hidden", "later"} {
+				if id == "hidden" {
+					if err := r.Withdraw(ctx, "x", id); err != nil {
+						t.Fatal(err)
+					}
+				}
+				msg := &model.DanmakuMessage{RoomID: "x", EventID: id, SendTime: time.Now(), VideoOffsetMS: &offset}
+				if err := r.SaveBatch(ctx, []*model.DanmakuMessage{msg}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			page, err := r.Playback(ctx, "x", 1000, 1001, 0)
+			if err != nil || len(page) != 2 || page[0].EventID != "visible" {
+				t.Fatalf("playback %+v %v", page, err)
+			}
+			page, err = r.Playback(ctx, "x", 1000, 1001, int64(page[0].ID))
+			if err != nil || len(page) != 1 || page[0].EventID != "later" {
+				t.Fatal(page, err)
+			}
 			var versions int
-			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 1 {
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 2 {
 				t.Fatalf("ledger: %d %v", versions, err)
 			}
 		})

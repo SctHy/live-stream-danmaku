@@ -1,105 +1,74 @@
 package ws
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
+	"strings"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-
+	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
 	"github.com/charlesAcmen/livestream-danmaku/internal/model"
-	"go.uber.org/zap"
 )
 
-// RegisterActionHandlers registers all business logic callbacks.
-// This implements the "Strategy Pattern" to handle different WebSocket message types.
-// MUST be called in main.go of server before server starts.
+func (m *Manager) reply(c *Client, id, status string) {
+	if !c.Session {
+		return
+	}
+	data, _ := json.Marshal(map[string]string{"client_msg_id": id, "status": status})
+	wire, _ := json.Marshal(model.WsPacket{Type: 104, Data: data})
+	m.safeSend(c, m.frame(wire, 1))
+}
+
+func (m *Manager) permitted(c *Client, action int, id string) bool {
+	if !c.Session {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	status, err := infra.Policy(ctx, m.RedisClient, c.RoomID, c.UserID, action)
+	if err != nil {
+		status = "unavailable"
+	}
+	if status != "ok" {
+		m.reply(c, id, status)
+		return false
+	}
+	return true
+}
+
 func RegisterActionHandlers() {
-
-	// 1. Handle Danmaku Logic
 	RegisterAction(model.TypeDanmaku, func(c *Client, m *Manager, data []byte) {
-		// A. Parse the inner content
-		// The client only sends {"content": "hello"}
-		var inputMsg model.DanmakuMessage
-		if err := json.Unmarshal(data, &inputMsg); err != nil {
-			logger.Log.Error("[SERVER HANDLER]Invalid Danmaku Data format",
-				zap.Uint64("uid", c.UserID),
-				zap.Error(err),
-			)
+		var input model.DanmakuMessage
+		if json.Unmarshal(data, &input) != nil || !input.FitsHistory() ||
+			strings.TrimSpace(input.Content) == "" || len(input.ClientMsgID) > 80 ||
+			(input.VideoOffsetMS != nil && (*input.VideoOffsetMS < 0 || *input.VideoOffsetMS >= 86400000)) {
+			m.reply(c, input.ClientMsgID, "invalid")
 			return
 		}
-
-		// B. Enrich the message (Add Server-Side Metadata)
-		// Client doesn't know its own ID/Avatar trustfully, Server adds it.
-		// This ensures all downstream systems (Redis, Kafka) know WHO sent it.
-		fullMsg := model.DanmakuMessage{
-			EventID: rand.Text(),
-			RoomID:  c.RoomID,
-			UserID:  c.UserID,
-			Content: inputMsg.Content,
-			//if sent successfully,set send time as accepting time
-			SendTime: time.Now(),
-		}
-
-		if !fullMsg.FitsHistory() {
-			logger.Log.Warn("Danmaku exceeds history field limits", zap.Uint64("uid", c.UserID))
+		if !m.permitted(c, model.TypeDanmaku, input.ClientMsgID) {
 			return
 		}
-
-		// C. Wrap in outgoing Envelope
-		dataBytes, _ := json.Marshal(fullMsg)
-		outgoingPacket := model.WsPacket{
-			Type:   model.TypeDanmaku,
-			RoomID: c.RoomID,
-			Data:   dataBytes,
+		msg := model.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), VideoOffsetMS: input.VideoOffsetMS, ClientMsgID: input.ClientMsgID}
+		body, _ := json.Marshal(msg)
+		packet := &model.WsPacket{Type: model.TypeDanmaku, RoomID: c.RoomID, Data: body}
+		if m.enqueue(packet, c.done) {
+			m.reply(c, input.ClientMsgID, "accepted")
+		} else {
+			m.reply(c, input.ClientMsgID, "overloaded")
 		}
-		m.enqueue(&outgoingPacket)
-		// logger.Log.Debug("[SERVER HANDLER]Danmaku processed",
-		// 	zap.Uint64("uid", c.UserID),
-		// 	zap.String("room", c.RoomID),
-		// 	zap.String("content", inputMsg.Content),
-		// )
 	})
-
-	logger.Log.Info("[SERVER HANDLER]Registered Handler: Danmaku")
-
-	// 2. Handle Like Logic
 	RegisterAction(model.ActionLike, func(c *Client, m *Manager, data []byte) {
-		// A. Parse Input
-		// Client sends: {"count": 10}
-		var likes model.Like
-		if err := json.Unmarshal(data, &likes); err != nil {
-			// Default to 1 if payload is empty or invalid
-			likes.Count = 1
+		var like model.Like
+		if json.Unmarshal(data, &like) != nil || like.Count == 0 || like.Count > 20 {
+			m.reply(c, "", "invalid")
+			return
 		}
-		// defend from frontend
-		if likes.Count <= 0 {
-			likes.Count = 1
+		if !m.permitted(c, model.ActionLike, "") {
+			return
 		}
-
 		m.likesMu.Lock()
-		m.localLikes[c.RoomID] += likes.Count
+		m.localLikes[c.RoomID] += like.Count
 		m.likesMu.Unlock()
-
-		logger.Log.Info("[SERVER HANDLER] Liked",
-			zap.Uint64("uid", c.UserID),
-			zap.Uint64("count", likes.Count),
-			zap.String("room", c.RoomID),
-		)
-
-		// B. Wrap in WsPacket (Envelope)
-		// We re-marshal the likes to ensure format consistency
-		// dataBytes, _ := json.Marshal(likes)
-
-		// outgoingPacket := model.WsPacket{
-		// 	Type:   model.ActionLike,
-		// 	RoomID: c.RoomID,
-		// 	Data:   dataBytes,
-		// }
-
-		// // C. Send to Manager (Handover responsibility)
-		// m.enqueue(&outgoingPacket)
-
 	})
-	logger.Log.Info("[SERVER HANDLER]Registered Handler: Like/Action")
 }

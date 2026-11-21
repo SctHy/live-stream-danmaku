@@ -30,8 +30,10 @@ const (
 // It contains metadata required for ROUTING without parsing the inner payload.
 type WsPacket struct {
 	// Type tells the receiver what 'Data' contains.
-	Type   int    `json:"type"`
-	RoomID string `json:"room_id,omitempty"` // Routing key
+	Position string `json:"pos,omitempty"`
+	Previous string `json:"prev,omitempty"`
+	Type     int    `json:"type"`
+	RoomID   string `json:"room_id,omitempty"` // Routing key
 	// type RawMessage []byte,rather than map[int]interface{} using Assert
 	Data json.RawMessage `json:"data"`
 }
@@ -42,12 +44,14 @@ type WsPacket struct {
 
 // DanmakuMessage is a persisted event and the WebSocket chat payload.
 type DanmakuMessage struct {
-	EventID  string    `json:"event_id,omitempty"`
-	ID       uint64    `json:"id"`
-	RoomID   string    `json:"room_id"`
-	UserID   uint64    `json:"user_id"`
-	Content  string    `json:"content"`
-	SendTime time.Time `json:"send_time"`
+	VideoOffsetMS *int64    `json:"video_offset_ms,omitempty"`
+	ClientMsgID   string    `json:"client_msg_id,omitempty"`
+	EventID       string    `json:"event_id,omitempty"`
+	ID            uint64    `json:"id"`
+	RoomID        string    `json:"room_id"`
+	UserID        uint64    `json:"user_id"`
+	Content       string    `json:"content"`
+	SendTime      time.Time `json:"send_time"`
 }
 
 // FitsHistory checks the PostgreSQL text limits before publishing or batching.
@@ -58,8 +62,9 @@ func (d DanmakuMessage) FitsHistory() bool {
 
 // StatsData: The content for TypeStats
 type StatsData struct {
-	Online uint64 `json:"online"`
-	Likes  uint64 `json:"likes"`
+	Position string `json:"pos,omitempty"`
+	Online   uint64 `json:"online"`
+	Likes    uint64 `json:"likes"`
 }
 
 // CmdLike: The content for ActionLike (Client -> Server)

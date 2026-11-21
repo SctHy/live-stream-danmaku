@@ -7,6 +7,7 @@ import (
 	"hash/maphash"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time" //broadcast stats data timer
@@ -20,12 +21,17 @@ import (
 
 // Job structure
 type BroadcastJob struct {
+	queued  time.Time
 	Clients []*Client // Immutable recipient snapshot.
 	Packets [][]byte
 }
 
 // Manager is responsible for managing all websocket clients and the Redis connection
 type Manager struct {
+	life      context.Context
+	stop      context.CancelFunc
+	drainOnce sync.Once
+
 	// ServerID is a unique identifier for this running instance.
 	// It is used to separate stats in Redis.
 	ServerID string
@@ -38,11 +44,24 @@ type Manager struct {
 
 	publishQueues   []chan *model.WsPacket
 	shardSeed       maphash.Seed
+	ingress         sync.RWMutex
+	draining        bool
+	publishWorkers  sync.WaitGroup
+	historyDone     chan struct{}
+	started         chan struct{}
 	sendCapacity    int
 	BatchWindow     time.Duration
 	MinBatchViewers int
 	Prepared        bool
 	dropped         atomic.Uint64
+	shardDrops      atomic.Uint64
+	clientDrops     atomic.Uint64
+	rejected        atomic.Uint64
+	waitNanos       atomic.Uint64
+	measuredJobs    atomic.Uint64
+	liveFailures    atomic.Uint64
+	statsRunning    atomic.Bool
+	ready           map[string]chan struct{}
 	historyQueue    chan []byte
 	publisher       *redis.Client
 
@@ -78,35 +97,39 @@ const (
 	RoomShards           = 32
 )
 
-func NewManager(sendCapacity int) *Manager {
+func NewManager(sendCapacity, shards int) *Manager {
 	// Generate a unique ID for this server instance.
 	// In k8s, you might use os.Hostname().
 	// Here we use Hostname + Random Int to ensure uniqueness during local restarts.
 	hostname, _ := os.Hostname()
 	serverID := fmt.Sprintf("%s-%d", hostname, rand.Intn(100000))
 
-	rdb := infra.InitRedisClient()
-	opts := *rdb.Options()
-	opts.MaxRetries = -1
+	rdb := infra.InitRedisClient(0)
+
+	life, cancel := context.WithCancel(context.Background())
 	m := &Manager{
+		life: life, stop: cancel,
 		ServerID:       serverID,
+		started:        make(chan struct{}),
+		historyDone:    make(chan struct{}),
 		Register:       make(chan *Client),
 		Unregister:     make(chan *Client),
 		localLikes:     make(map[string]uint64),
 		Rooms:          make(map[string]map[*Client]struct{}),
+		ready:          make(map[string]chan struct{}),
 		cancelSub:      make(map[string]context.CancelFunc),
 		snapshots:      make(map[string][]*Client),
-		publishQueues:  make([]chan *model.WsPacket, RoomShards),
-		deliveryQueues: make([]chan *BroadcastJob, RoomShards),
+		publishQueues:  make([]chan *model.WsPacket, shards),
+		deliveryQueues: make([]chan *BroadcastJob, shards),
 		sendCapacity:   sendCapacity,
 		historyQueue:   make(chan []byte, infra.ProducerChanBufSize),
-		publisher:      redis.NewClient(&opts),
+		publisher:      infra.InitRedisClient(-1),
 		shardSeed:      maphash.MakeSeed(),
 		RedisClient:    rdb,
 	}
-	for i := range RoomShards {
-		m.publishQueues[i] = make(chan *model.WsPacket, BroadcastChanSize/RoomShards)
-		m.deliveryQueues[i] = make(chan *BroadcastJob, (BroadcastJobChanSize+RoomShards-1)/RoomShards)
+	for i := range shards {
+		m.publishQueues[i] = make(chan *model.WsPacket, BroadcastChanSize/shards)
+		m.deliveryQueues[i] = make(chan *BroadcastJob, (BroadcastJobChanSize+shards-1)/shards)
 	}
 	return m
 }
@@ -115,12 +138,15 @@ func NewManager(sendCapacity int) *Manager {
 func (m *Manager) Start() {
 	logger.Log.Info("[MANAGER] Multi-room Manager started")
 	m.StartWorkers()
-	go infra.PublishHistory(m.historyQueue)
+	go func() { defer close(m.historyDone); infra.PublishHistory(m.historyQueue) }()
+	close(m.started)
 	statsTicker := time.NewTicker(BroadCastInterVal)
 	defer statsTicker.Stop()
 
 	for {
 		select {
+		case <-m.life.Done():
+			return
 		case client := <-m.Register:
 			m.handleRegister(client)
 		case client := <-m.Unregister:
@@ -134,7 +160,9 @@ func (m *Manager) Start() {
 				logger.Log.Warn("Live delivery dropped", zap.Uint64("recipient_messages", n))
 			}
 			infra.ReportDeliveryFailures()
-			go m.broadcastStats()
+			if m.statsRunning.CompareAndSwap(false, true) {
+				go func() { defer m.statsRunning.Store(false); m.broadcastStats() }()
+			}
 		}
 	}
 }
@@ -142,7 +170,9 @@ func (m *Manager) Start() {
 // StartWorkers should be called inside Manager.Start()
 func (m *Manager) StartWorkers() {
 	for i, queue := range m.publishQueues {
+		m.publishWorkers.Add(1)
 		go func() {
+			defer m.publishWorkers.Done()
 			for packet := range queue {
 				m.handleBroadcast(packet)
 			}
@@ -155,14 +185,50 @@ func (m *Manager) roomShard(room string) int {
 	return int(maphash.String(m.shardSeed, room) % uint64(len(m.deliveryQueues)))
 }
 
-func (m *Manager) enqueue(packet *model.WsPacket) {
-	m.publishQueues[m.roomShard(packet.RoomID)] <- packet
+func (m *Manager) enqueue(packet *model.WsPacket, closed <-chan struct{}) bool {
+	m.ingress.RLock()
+	defer m.ingress.RUnlock()
+	if m.draining {
+		return false
+	}
+	queue := m.publishQueues[m.roomShard(packet.RoomID)]
+	select {
+	case queue <- packet:
+		return true
+	default:
+	}
+	timer := time.NewTimer(25 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case queue <- packet:
+		return true
+	case <-closed:
+		return false
+	case <-timer.C:
+		m.rejected.Add(1)
+		return false
+	}
 }
 
 func (m *Manager) broadcastWorker(queue <-chan *BroadcastJob) {
-	for job := range queue {
-		m.deliver(job)
+	var stopped <-chan struct{}
+	if m.life != nil {
+		stopped = m.life.Done()
 	}
+	for {
+		select {
+		case <-stopped:
+			return
+		case job, ok := <-queue:
+			if !ok {
+				return
+			}
+			m.waitNanos.Add(uint64(time.Since(job.queued)))
+			m.measuredJobs.Add(1)
+			m.deliver(job)
+		}
+	}
+
 }
 
 func (m *Manager) handleRegister(client *Client) {
@@ -170,33 +236,35 @@ func (m *Manager) handleRegister(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 1. Initialize room map if it's the first client in this room on THIS server
+	if m.life != nil && m.life.Err() != nil {
+		client.Close()
+		return
+	}
+	// Only occupied rooms hold a Redis subscription.
 	if _, ok := m.Rooms[client.RoomID]; !ok {
 		m.Rooms[client.RoomID] = make(map[*Client]struct{})
 		// 1. Create a cancelable context for this room's subscription
 		// no timeout:cancel() is called when empty room,server closing or unsubscribe
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(m.life)
 		m.cancelSub[client.RoomID] = cancel
 		// 2. Start a background goroutine to listen to THIS room's Redis channel
 		// Pass context to subscriber
-		go m.subscribeToRoom(ctx, client.RoomID)
+		ready := make(chan struct{})
+		m.ready[client.RoomID] = ready
+		go m.subscribeToRoom(ctx, client.RoomID, ready)
 		logger.Log.Info("[MANAGER] New room created on server", zap.String("room", client.RoomID))
 	}
 
 	//struct{} is type,second {} is initializing instance
 	m.Rooms[client.RoomID][client] = struct{}{}
 	delete(m.snapshots, client.RoomID)
+	client.subscription = m.ready[client.RoomID]
+	if client.registered != nil {
+		close(client.registered)
+	}
 
-	// Async Redis update: Online Count
-	// because Incr involves network I/O,TCP round trip,queue in redis,
-	// potentially blocking,timeout,shaking etc.
-	// go infra.UpdateOnlineCount(m.RedisClient, client.RoomID, 1)
-	// Reason: We use heartbeat in broadcastStats now.
-	// logger.Log.Info("[MANAGER] Client registered",
-	// 	zap.Uint64("uid", client.UserID),
-	// 	zap.String("room", client.RoomID),
-	// 	zap.Int("total", len(m.Rooms[client.RoomID])))
 }
+
 func (m *Manager) handleUnregister(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -208,23 +276,16 @@ func (m *Manager) handleUnregister(client *Client) {
 			// Do NOT close(client.Send) here if workers are still using it.
 			// close(client.Send)
 			client.Close()
-			// logger.Log.Info(
-			// 	"[MANAGER] Client disconnected",
-			// 	zap.Uint64("userID", client.UserID),
-			// 	zap.Int("total", len(clients)),
-			// )
-			// Clean up room and STOP subscription if last client leaves
 			if len(clients) == 0 {
 				delete(m.Rooms, client.RoomID)
+				delete(m.ready, client.RoomID)
 				if cancel, exists := m.cancelSub[client.RoomID]; exists {
 					cancel() // Signals subscribeToRoom to exit
 					delete(m.cancelSub, client.RoomID)
 					logger.Log.Info("[MANAGER] Room subscription stopped", zap.String("room", client.RoomID))
 				}
 			}
-			// Async Redis update: Decr Online Count
-			// go infra.UpdateOnlineCount(m.RedisClient, client.RoomID, -1)
-			// We use heartbeat in broadcastStats now.
+
 		}
 	}
 }
@@ -236,33 +297,10 @@ func (m *Manager) handleBroadcast(packet *model.WsPacket) {
 		return
 	}
 
-	switch packet.Type {
-	// Case A: Danmaku (User generated)
-	// Send to Redis (so other servers see it).
-	// Send to Kafka (for history storage).
-	// Note: We do NOT call m.broadcastToLocalClients here.
-	// Why? Because Redis Sub goroutine will receive it and call broadcastToLocalClients.
-	// If we call it here, the local user will see the message twice!
-	case model.TypeDanmaku:
-		m.processDanmaku(packet.RoomID, payload)
-	// Case B: Like (User generated)
-	// Send to Redis (real-time).
-	// Skip Kafka (usually likes are just counters, detailed logs might not be needed).
-	case model.ActionLike:
-	// that is not gonna happen cause like packet will not be sent in broadcast channel
-	// m.processLike(packet)
-	// Case A: Stats (Generated locally, sent locally)
-	// Do NOT send to Redis (avoids broadcast storm).
-	// Do NOT send to Kafka (no need to save transient stats).
-	case model.TypeStats:
-		m.broadcastToLocalClients(packet.RoomID, payload)
-	default:
-		logger.Log.Warn("[MANAGER] Unknown packet type", zap.Int("type", packet.Type))
-	}
+	m.processDanmaku(packet.RoomID, payload)
 }
 
-// processDanmaku handles user messages.
-// Strategy: Persist to Kafka + Broadcast to All Servers (via Redis).
+// The history queue and live transport can fail independently.
 func (m *Manager) processDanmaku(roomID string, data []byte) {
 	// Async IO to Redis and Kafka
 
@@ -272,25 +310,19 @@ func (m *Manager) processDanmaku(roomID string, data []byte) {
 	default:
 		infra.HistoryQueueDrops.Add(1)
 	}
+	if strings.Contains(roomID, "/") {
+		ctx, cancel := context.WithTimeout(context.Background(), infra.RedisCancelTimeout)
+		defer cancel()
+		if err := infra.Journal(ctx, m.publisher, roomID, data); err != nil {
+			m.liveFailures.Add(1)
+		}
+		return
+	}
 	infra.PublishToRoom(m.publisher, roomID, data)
 }
 
-// processLike handles user likes.
-// Strategy: Update State (Redis KV). Do NOT broadcast every single like to save bandwidth.
-// The Ticker will pick up the new count later.
-// func (m *Manager) processLike(packet *model.WsPacket) {
-// 	// 1. Business Logic: Increment Redis Counter
-// 	// We need to peek inside the Data to know the "Count"
-// 	var cmd model.Like
-// 	if err := json.Unmarshal(packet.Data, &cmd); err == nil {
-// 		// Only update the counter in Redis.
-// 		go infra.IncrRoomLikes(m.RedisClient, packet.RoomID, cmd.Count)
-// 	}
-// }
-
 // broadcastStats fetches stats for ALL active rooms and sends updates locally.
 func (m *Manager) broadcastStats() {
-	// logger.Log.Info("[MANAGER]BroadcastStats called")
 
 	m.likesMu.Lock()
 	currentBatchLikes := m.localLikes
@@ -307,71 +339,61 @@ func (m *Manager) broadcastStats() {
 
 	m.mu.RUnlock()
 
-	// Decoupling: Calculate TTL here, not in infra
-	// 3s interval -> 7s TTL (Interval * 2 + 1s)
-	reportTTL := BroadCastInterVal*2 + time.Second
-
-	for roomID, count := range localStats {
-		// online, likes := infra.GetRoomStats(m.RedisClient, roomID)
-
-		// STEP A: Report "I am alive and I have X users" to Redis
-		// This overwrites any previous value for this server.
-		// If this server crashes, this key will expire in 5 seconds.
-		infra.UpdateServerOnline(m.RedisClient, roomID, m.ServerID, count, reportTTL)
-		if likesDelta, ok := currentBatchLikes[roomID]; ok && likesDelta > 0 {
-			go infra.IncrRoomLikes(m.RedisClient, roomID, likesDelta)
+	for room := range currentBatchLikes {
+		if _, ok := localStats[room]; !ok {
+			localStats[room] = 0
 		}
-		// STEP B: Fetch the global total (Sum of all servers)
-		// We ignore likes for now as requested.
-		totalOnline := infra.GetTotalOnline(m.RedisClient, roomID)
-		totalLikes := infra.GetRoomLikes(m.RedisClient, roomID)
-		stats := model.StatsData{
-			Online: totalOnline,
-			Likes:  totalLikes,
-		}
-		logger.Log.Info("[MANAGER] Room Stats",
-			zap.String("roomID", roomID),
-			zap.Uint64("likes", totalLikes),
-			zap.Uint64("online", totalOnline),
-		)
-		dataBytes, _ := json.Marshal(stats)
-
-		// Create packet
-		packet := &model.WsPacket{
-			Type:   model.TypeStats,
-			RoomID: roomID,
-			Data:   dataBytes,
-		}
-
-		payload, err := json.Marshal(packet)
+	}
+	chunk := make(map[string]int, 128)
+	flush := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), infra.RedisCancelTimeout)
+		defer cancel()
+		stats, err := infra.SnapshotStats(ctx, m.publisher, m.ServerID, chunk, currentBatchLikes, BroadCastInterVal*2+time.Second)
 		if err != nil {
-			logger.Log.Error("[MANAGER] Marshal stats packet failed", zap.Error(err))
-			continue
+			logger.Log.Warn("Room statistics unavailable", zap.Error(err))
+			return
 		}
-		// Non-blocking send to self (avoid deadlock if channel is full)
-		// select {
-		// case m.Broadcast <- packet:
-		// default:
-		// 	logger.Log.Warn("[MANAGER] Broadcast channel full, skipping stats", zap.String("room", roomID))
-		// }
-
-		m.broadcastToLocalClients(roomID, payload)
+		for room, s := range stats {
+			data, _ := json.Marshal(s)
+			wire, _ := json.Marshal(model.WsPacket{Type: model.TypeStats, RoomID: room, Data: data})
+			frame := m.frame(wire, 1)
+			for _, client := range m.roomSnapshot(room) {
+				client.setStats(frame)
+			}
+		}
+	}
+	for room, count := range localStats {
+		chunk[room] = count
+		if len(chunk) == 128 {
+			flush()
+			clear(chunk)
+		}
+	}
+	if len(chunk) > 0 {
+		flush()
 	}
 }
 
 // subscribeToRoom listens to a specific Redis channel for a room
-func (m *Manager) subscribeToRoom(ctx context.Context, roomID string) {
-	// Channel name: e.g., "room:1001:pubsub"
-	channelName := fmt.Sprintf(infra.KeyRoomPubSub, roomID)
-	//context.Background(): a default context that never cancels, never expires, and has no values.
-	//or context.WithTimeOut(...,3*time.Second)
-	//here ctx is cancellable
-	pubsub := m.RedisClient.Subscribe(ctx, channelName)
-	defer pubsub.Close()
-	// Go channel to receive Redis messages(read only)
-	ch := pubsub.Channel()
+func (m *Manager) subscribeToRoom(ctx context.Context, roomID string, ready chan struct{}) {
+	channel := fmt.Sprintf(infra.KeyRoomPubSub, roomID)
+	for ctx.Err() == nil {
+		pubsub := m.RedisClient.Subscribe(ctx, channel)
+		if _, err := pubsub.ReceiveTimeout(ctx, 3*time.Second); err == nil {
+			if ready != nil {
+				close(ready)
+				ready = nil
+			}
+			m.consumeRoom(ctx, roomID, pubsub.Channel())
+		}
+		pubsub.Close()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 
-	m.consumeRoom(ctx, roomID, ch)
 }
 
 // roomSnapshot reuses a read-only recipient list until the room membership changes.
@@ -419,9 +441,88 @@ func (m *Manager) broadcastToLocalClients(roomID string, payload []byte) {
 }
 
 func (m *Manager) queueJob(roomID string, job *BroadcastJob) {
+	job.queued = time.Now()
 	select {
 	case m.deliveryQueues[m.roomShard(roomID)] <- job:
 	default:
+		m.shardDrops.Add(uint64(len(job.Packets)) * uint64(len(job.Clients)))
 		m.dropped.Add(uint64(len(job.Packets)) * uint64(len(job.Clients)))
+	}
+}
+
+func (m *Manager) Metrics() map[string]uint64 {
+	return map[string]uint64{
+		"shard_recipient_drops":        m.shardDrops.Load(),
+		"client_recipient_drops":       m.clientDrops.Load(),
+		"publish_queue_rejected":       m.rejected.Load(),
+		"delivery_queue_wait_ns_total": m.waitNanos.Load(),
+		"delivery_jobs":                m.measuredJobs.Load(),
+		"journal_errors":               m.liveFailures.Load(),
+		"history_queue_entries":        uint64(len(m.historyQueue)),
+	}
+}
+func (m *Manager) Join(ctx context.Context, c *Client) bool {
+	select {
+	case m.Register <- c:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-m.life.Done():
+		return false
+	}
+}
+func (m *Manager) Leave(c *Client) {
+	select {
+	case m.Unregister <- c:
+	case <-m.life.Done():
+		c.Close()
+	}
+}
+func (c *Client) AwaitSubscription(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.done:
+		return false
+	case <-c.registered:
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.done:
+		return false
+	case <-c.subscription:
+		return true
+	}
+}
+func (m *Manager) CloseClients() {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, room := range m.Rooms {
+		for c := range room {
+			c.Close()
+		}
+	}
+}
+
+// Drain stops accepting publications and lets already accepted history reach the producer.
+func (m *Manager) Drain(ctx context.Context) error {
+	<-m.started
+	m.drainOnce.Do(func() {
+		m.ingress.Lock()
+		m.draining = true
+		for _, q := range m.publishQueues {
+			close(q)
+		}
+		m.ingress.Unlock()
+		m.stop()
+		m.CloseClients()
+		go func() { m.publishWorkers.Wait(); close(m.historyQueue) }()
+	})
+	select {
+	case <-m.historyDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

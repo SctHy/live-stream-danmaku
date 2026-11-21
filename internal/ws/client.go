@@ -17,9 +17,14 @@ const (
 )
 
 type Client struct {
-	UserID   uint64 // client id
-	Username string
-	RoomID   string
+	Session          bool
+	registered       chan struct{}
+	subscription     <-chan struct{}
+	consecutiveDrops atomic.Uint32
+	stats            chan *outboundFrame
+	UserID           uint64 // client id
+	Username         string
+	RoomID           string
 
 	Socket       *websocket.Conn // the websocket connection that the server holds for each client
 	batch        bool
@@ -33,13 +38,15 @@ type Client struct {
 
 func (m *Manager) NewClient(uid uint64, name, room string, conn *websocket.Conn) *Client {
 	return &Client{
-		batch:    conn != nil && conn.Subprotocol() == model.BatchProtocol,
-		UserID:   uid,
-		Username: name,
-		RoomID:   room,
-		Socket:   conn,
-		Send:     make(chan *outboundFrame, m.sendCapacity),
-		done:     make(chan struct{}),
+		registered: make(chan struct{}),
+		stats:      make(chan *outboundFrame, 1),
+		batch:      conn != nil && conn.Subprotocol() == model.BatchProtocol,
+		UserID:     uid,
+		Username:   name,
+		RoomID:     room,
+		Socket:     conn,
+		Send:       make(chan *outboundFrame, m.sendCapacity),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -47,10 +54,11 @@ func (m *Manager) NewClient(uid uint64, name, room string, conn *websocket.Conn)
 func (c *Client) ReadPump(manager *Manager) {
 	defer func() {
 		// if read failed (client disconnected), unregister the client
-		manager.Unregister <- c
+		manager.Leave(c)
 		c.Socket.Close()
 	}()
 
+	c.Socket.SetReadLimit(8192)
 	for {
 		// 1. read message from WebSocket
 		_, messageBytes, err := c.Socket.ReadMessage()
@@ -88,35 +96,45 @@ func (c *Client) WritePump() {
 	}()
 
 	for {
+		var message *outboundFrame
+		var chat bool
 		select {
-		// get message from Send channel
-		// Note: 'message' here is already a JSON string coming from Redis/Manager.
-		case message, ok := <-c.Send:
-			if !ok {
-				// channel is closed
-				// Manager closed the channel (though in our new logic, manager shouldn't)
-				c.Socket.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
-
-			c.Socket.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			var err error
-			if message.prepared != nil {
-				err = c.Socket.WritePreparedMessage(message.prepared)
-			} else {
-				err = c.Socket.WriteMessage(websocket.TextMessage, message.payload)
-			}
-			c.pendingBytes.Add(-int64(len(message.payload)))
-			if err != nil {
-				logger.Log.Warn("[CLIENT] Write error",
-					zap.Uint64("uid", c.UserID), zap.Error(err))
-				return
-			}
 		case <-c.done:
-			// Signal received to stop this goroutine
-			// logger.Log.Debug("[CLIENT] WritePump exiting via done channel", zap.Uint64("uid", c.UserID))
+			return
+		case message = <-c.Send:
+			chat = true
+		case message = <-c.stats:
+		}
+		c.Socket.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		var err error
+		if message.prepared != nil {
+			err = c.Socket.WritePreparedMessage(message.prepared)
+		} else {
+			err = c.Socket.WriteMessage(websocket.TextMessage, message.payload)
+		}
+		if chat {
+			c.pendingBytes.Add(-int64(len(message.payload)))
+		}
+		if err != nil {
 			return
 		}
+	}
+}
+
+// A single stats writer replaces an outdated snapshot without delaying chat delivery.
+func (c *Client) setStats(frame *outboundFrame) {
+	select {
+	case c.stats <- frame:
+		return
+	default:
+	}
+	select {
+	case <-c.stats:
+	default:
+	}
+	select {
+	case c.stats <- frame:
+	default:
 	}
 }
 
@@ -127,7 +145,9 @@ func (c *Client) Close() {
 		// 1. Close the done channel to signal WritePump and other observers
 		close(c.done)
 		// 2. Close the physical connection
-		c.Socket.Close()
+		if c.Socket != nil {
+			c.Socket.Close()
+		}
 		// Note: We DO NOT close c.Send here to prevent panic in workers
 		// logger.Log.Info("[CLIENT] Connection closed safely", zap.Uint64("uid", c.UserID))
 	})

@@ -137,7 +137,9 @@ func PublishHistory(queue <-chan []byte) {
 		for payload := range queue {
 			producer.Input() <- &sarama.ProducerMessage{Topic: DanmakuSaveTopic, Value: sarama.ByteEncoder(payload)}
 		}
-		producer.AsyncClose()
+		if err := producer.Close(); err != nil {
+			logger.Log.Warn("History producer drain", zap.Error(err))
+		}
 		return
 	}
 }

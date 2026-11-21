@@ -58,3 +58,29 @@ func TestRoomBatchDrainsInOrder(t *testing.T) {
 		t.Fatal(total)
 	}
 }
+
+func TestStalledViewerAndLatestStats(t *testing.T) {
+	m := Manager{sendCapacity: 1}
+	stalled := m.NewClient(1, "", "room", nil)
+	frame := m.frame([]byte("hello"), 1)
+	m.safeSend(stalled, frame)
+	for range 8 {
+		m.safeSend(stalled, frame)
+	}
+	select {
+	case <-stalled.done:
+	default:
+		t.Fatal("stalled viewer still connected")
+	}
+	if m.clientDrops.Load() != 8 || m.shardDrops.Load() != 0 {
+		t.Fatal(m.Metrics())
+	}
+	healthy := m.NewClient(2, "", "room", nil)
+	healthy.setStats(frame)
+	latest := m.frame([]byte("new"), 1)
+	healthy.setStats(latest)
+	m.safeSend(healthy, frame)
+	if <-healthy.stats != latest || <-healthy.Send != frame {
+		t.Fatal("stats displaced chat")
+	}
+}

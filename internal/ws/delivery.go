@@ -64,12 +64,17 @@ func (m *Manager) safeSend(c *Client, f *outboundFrame) {
 	if c.pendingBytes.Add(size) <= maxQueuedBytes {
 		select {
 		case c.Send <- f:
+			c.consecutiveDrops.Store(0)
 			return
 		default:
 		}
 	}
 	c.pendingBytes.Add(-size)
 	m.dropped.Add(uint64(f.count))
+	m.clientDrops.Add(uint64(f.count))
+	if c.consecutiveDrops.Add(1) == 8 && c.done != nil {
+		c.Close()
+	}
 }
 
 // Only consecutive arrivals in a busy room start a batch. An idle room sends
