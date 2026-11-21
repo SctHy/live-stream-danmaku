@@ -92,7 +92,7 @@ func InitKafkaProducer(brokers []string) (sarama.AsyncProducer, error) {
 }
 
 // InitKafkaConsumerGroup initializes the consumer group with high-throughput settings.
-func InitKafkaConsumerGroup(brokers []string, groupID string) sarama.ConsumerGroup {
+func InitKafkaConsumerGroup(brokers []string, groupID string) (sarama.ConsumerGroup, error) {
 	config := sarama.NewConfig()
 	// OffsetOldest: If the group is new, start from the very beginning.
 	// This ensures we don't miss messages sent while the consumer was down.
@@ -109,7 +109,7 @@ func InitKafkaConsumerGroup(brokers []string, groupID string) sarama.ConsumerGro
 	// Connect to Brokers
 	group, err := sarama.NewConsumerGroup(brokers, groupID, config)
 	if err != nil {
-		logger.Log.Panic("[KAFKA INFRA] Failed to create consumer group", zap.Error(err))
+		return nil, err
 	}
 
 	// Monitor Errors in background
@@ -120,7 +120,7 @@ func InitKafkaConsumerGroup(brokers []string, groupID string) sarama.ConsumerGro
 		}
 	}()
 
-	return group
+	return group, nil
 }
 
 // PublishHistory runs independently from live Redis delivery. During startup

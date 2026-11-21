@@ -13,7 +13,7 @@ import (
 
 // Keep the recovery cursor and live publish in one Redis operation across gateways.
 // Preserve the original JSON bytes, including integer user IDs.
-var appendEvent = redis.NewScript(`
+const journalLua = `
 local tail=redis.call('XREVRANGE',KEYS[1],'+','-','COUNT',1)
 local prev='0-0'
 local epoch=ARGV[2]
@@ -25,11 +25,51 @@ local id=epoch..'@'..redis.call('XADD',KEYS[1],'MAXLEN',256,'*','packet',ARGV[1]
 redis.call('EXPIRE',KEYS[1],120)
 local wire='{"pos":"'..id..'","prev":"'..prev..'",'..string.sub(ARGV[1],2)
 redis.call('PUBLISH',KEYS[2],wire)
-return id
-`)
+`
+
+var appendEvent = redis.NewScript(journalLua + `return id`)
 
 func Journal(ctx context.Context, r *redis.Client, room string, payload []byte) error {
 	return appendEvent.Run(ctx, r, []string{"dm:recent:" + room, fmt.Sprintf(KeyRoomPubSub, room)}, string(payload), rand.Text()).Err()
+}
+
+// Session sends append an archive obligation in the same operation as the live
+// event. Reject new messages before publishing when the archive backlog is full.
+const archiveStream = "dm:archive:pending"
+
+var acceptEvent = redis.NewScript(`
+local existing=redis.call('GET',KEYS[3])
+if existing then return {'accepted',existing} end
+if redis.call('EXISTS',KEYS[4])==1 then return {'muted',''} end
+if redis.call('XLEN',KEYS[6])>=65536 then return {'overloaded',''} end
+local n=redis.call('INCR',KEYS[5])
+if n==1 then redis.call('PEXPIRE',KEYS[5],1000) end
+if n>8 then return {'rate_limited',''} end
+` + journalLua + `
+redis.call('XADD',KEYS[6],'*','packet',ARGV[1])
+redis.call('SET',KEYS[3],ARGV[3],'EX',600)
+return {'accepted',ARGV[3]}
+`)
+
+func AcceptDanmaku(ctx context.Context, r *redis.Client, msg model.DanmakuMessage, payload []byte) (string, string, error) {
+	user := fmt.Sprintf("%s:%d", msg.RoomID, msg.UserID)
+	request := msg.ClientMsgID
+	if request == "" {
+		request = msg.EventID
+	}
+	keys := []string{
+		"dm:recent:" + msg.RoomID,
+		fmt.Sprintf(KeyRoomPubSub, msg.RoomID),
+		"dm:send:" + user + ":" + request,
+		"dm:mute:" + user,
+		fmt.Sprintf("dm:rate:%s:%d", user, model.TypeDanmaku),
+		archiveStream,
+	}
+	result, err := acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID).StringSlice()
+	if err != nil {
+		return "unavailable", "", err
+	}
+	return result[0], result[1], nil
 }
 
 type Recovery struct {

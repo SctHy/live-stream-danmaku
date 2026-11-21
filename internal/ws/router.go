@@ -12,10 +12,13 @@ import (
 )
 
 func (m *Manager) reply(c *Client, id, status string) {
+	m.receipt(c, id, status, "")
+}
+func (m *Manager) receipt(c *Client, id, status, eventID string) {
 	if !c.Session {
 		return
 	}
-	data, _ := json.Marshal(map[string]string{"client_msg_id": id, "status": status})
+	data, _ := json.Marshal(map[string]string{"client_msg_id": id, "status": status, "event_id": eventID})
 	wire, _ := json.Marshal(model.WsPacket{Type: 104, Data: data})
 	m.safeSend(c, m.frame(wire, 1))
 }
@@ -46,12 +49,20 @@ func RegisterActionHandlers() {
 			m.reply(c, input.ClientMsgID, "invalid")
 			return
 		}
-		if !m.permitted(c, model.TypeDanmaku, input.ClientMsgID) {
-			return
-		}
 		msg := model.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), VideoOffsetMS: input.VideoOffsetMS, ClientMsgID: input.ClientMsgID}
 		body, _ := json.Marshal(msg)
 		packet := &model.WsPacket{Type: model.TypeDanmaku, RoomID: c.RoomID, Data: body}
+		if c.Session {
+			ctx, cancel := context.WithTimeout(context.Background(), infra.RedisCancelTimeout)
+			defer cancel()
+			wire, _ := json.Marshal(packet)
+			status, eventID, err := infra.AcceptDanmaku(ctx, m.publisher, msg, wire)
+			if err != nil {
+				m.liveFailures.Add(1)
+			}
+			m.receipt(c, input.ClientMsgID, status, eventID)
+			return
+		}
 		if m.enqueue(packet, c.done) {
 			m.reply(c, input.ClientMsgID, "accepted")
 		} else {

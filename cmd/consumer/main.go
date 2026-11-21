@@ -38,21 +38,22 @@ func main() {
 
 	brokers := infra.KafkaBrokers()
 
-	group := infra.InitKafkaConsumerGroup(brokers, KafkaGroupID)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	group, err := infra.InitKafkaConsumerGroup(brokers, KafkaGroupID)
+	for err != nil {
+		logger.Log.Warn("History broker unavailable", zap.Error(err))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+		group, err = infra.InitKafkaConsumerGroup(brokers, KafkaGroupID)
+	}
 	defer group.Close()
-
-	// 5. Setup Graceful Shutdown
-	// Create a context that can be canceled.
-	ctx, cancel := context.WithCancel(context.Background())
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigChan
-		logger.Log.Info("[KAFKA CONSUMER]Signal received, shutting down...", zap.String("signal", sig.String()))
-		cancel() // cancel context，notify group.Consume to exit
-	}()
+	relayDone := make(chan struct{})
+	go func() { defer close(relayDone); infra.ForwardArchive(ctx) }()
+	defer func() { cancel(); <-relayDone }()
 
 	// 7. start consuming
 	logger.Log.Info("[KAFKA CONSUMER]Ready to process messages")

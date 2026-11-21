@@ -7,7 +7,6 @@ import (
 	"hash/maphash"
 	"math/rand"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time" //broadcast stats data timer
@@ -309,14 +308,6 @@ func (m *Manager) processDanmaku(roomID string, data []byte) {
 	case m.historyQueue <- data:
 	default:
 		infra.HistoryQueueDrops.Add(1)
-	}
-	if strings.Contains(roomID, "/") {
-		ctx, cancel := context.WithTimeout(context.Background(), infra.RedisCancelTimeout)
-		defer cancel()
-		if err := infra.Journal(ctx, m.publisher, roomID, data); err != nil {
-			m.liveFailures.Add(1)
-		}
-		return
 	}
 	infra.PublishToRoom(m.publisher, roomID, data)
 }
