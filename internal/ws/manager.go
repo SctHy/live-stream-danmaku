@@ -4,12 +4,13 @@ import (
 	"context" // context is used to manage the lifecycle of the Redis client
 	"encoding/json"
 	"fmt"
+	"hash/maphash"
 	"math/rand"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time" //broadcast stats data timer
 
-	"github.com/IBM/sarama" //driver for apache Kafka clients lib
 	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
 	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
 	"github.com/charlesAcmen/livestream-danmaku/internal/model"
@@ -20,7 +21,7 @@ import (
 // Job structure
 type BroadcastJob struct {
 	Clients []*Client // Immutable recipient snapshot.
-	Payload []byte
+	Packets [][]byte
 }
 
 // Manager is responsible for managing all websocket clients and the Redis connection
@@ -35,8 +36,15 @@ type Manager struct {
 	// Unregister channel: when a client disconnects, send the client pointer to the channel
 	Unregister chan *Client
 
-	// Broadcast channel: when a new message is to be broadcast, send the []byte to the channel
-	Broadcast chan *model.WsPacket
+	publishQueues   []chan *model.WsPacket
+	shardSeed       maphash.Seed
+	sendCapacity    int
+	BatchWindow     time.Duration
+	MinBatchViewers int
+	Prepared        bool
+	dropped         atomic.Uint64
+	historyQueue    chan []byte
+	publisher       *redis.Client
 
 	// Rooms: Map of RoomID -> Set of Clients
 	Rooms map[string]map[*Client]struct{}
@@ -53,7 +61,7 @@ type Manager struct {
 	//non blocking
 
 	// Channel to distribute broadcast tasks to background workers
-	broadcastJobChan chan *BroadcastJob
+	deliveryQueues []chan *BroadcastJob
 
 	// Map of RoomID -> Count of likes
 	localLikes map[string]uint64
@@ -61,48 +69,53 @@ type Manager struct {
 
 	// RedisClient: the connection to the Redis server.
 	RedisClient *redis.Client
-
-	// KafkaProducer sarama.SyncProducer
-	KafkaProducer sarama.AsyncProducer
 }
 
 const (
 	BroadCastInterVal    = 3 * time.Second
 	BroadcastChanSize    = 1024
 	BroadcastJobChanSize = 1000
-	WorkerCount          = 100
+	RoomShards           = 32
 )
 
-func NewManager() *Manager {
+func NewManager(sendCapacity int) *Manager {
 	// Generate a unique ID for this server instance.
 	// In k8s, you might use os.Hostname().
 	// Here we use Hostname + Random Int to ensure uniqueness during local restarts.
 	hostname, _ := os.Hostname()
 	serverID := fmt.Sprintf("%s-%d", hostname, rand.Intn(100000))
 
-	brokers := []string{"127.0.0.1:9092"}
 	rdb := infra.InitRedisClient()
-	producer := infra.InitKafkaProducer(brokers)
-	return &Manager{
-		ServerID:   serverID,
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
-		Broadcast:  make(chan *model.WsPacket, BroadcastChanSize), // Buffer to handle spikes
-		localLikes: make(map[string]uint64),
-		Rooms:      make(map[string]map[*Client]struct{}),
-		cancelSub:  make(map[string]context.CancelFunc),
-		snapshots:  make(map[string][]*Client),
-		// Initialize Job Channel
-		broadcastJobChan: make(chan *BroadcastJob, BroadcastJobChanSize),
-		RedisClient:      rdb,
-		KafkaProducer:    producer,
+	opts := *rdb.Options()
+	opts.MaxRetries = -1
+	m := &Manager{
+		ServerID:       serverID,
+		Register:       make(chan *Client),
+		Unregister:     make(chan *Client),
+		localLikes:     make(map[string]uint64),
+		Rooms:          make(map[string]map[*Client]struct{}),
+		cancelSub:      make(map[string]context.CancelFunc),
+		snapshots:      make(map[string][]*Client),
+		publishQueues:  make([]chan *model.WsPacket, RoomShards),
+		deliveryQueues: make([]chan *BroadcastJob, RoomShards),
+		sendCapacity:   sendCapacity,
+		historyQueue:   make(chan []byte, infra.ProducerChanBufSize),
+		publisher:      redis.NewClient(&opts),
+		shardSeed:      maphash.MakeSeed(),
+		RedisClient:    rdb,
 	}
+	for i := range RoomShards {
+		m.publishQueues[i] = make(chan *model.WsPacket, BroadcastChanSize/RoomShards)
+		m.deliveryQueues[i] = make(chan *BroadcastJob, (BroadcastJobChanSize+RoomShards-1)/RoomShards)
+	}
+	return m
 }
 
 // Creates the main loop for the manager.
 func (m *Manager) Start() {
 	logger.Log.Info("[MANAGER] Multi-room Manager started")
 	m.StartWorkers()
+	go infra.PublishHistory(m.historyQueue)
 	statsTicker := time.NewTicker(BroadCastInterVal)
 	defer statsTicker.Stop()
 
@@ -112,13 +125,15 @@ func (m *Manager) Start() {
 			m.handleRegister(client)
 		case client := <-m.Unregister:
 			m.handleUnregister(client)
-		case packet := <-m.Broadcast:
-			m.handleBroadcast(packet)
 		case <-statsTicker.C:
 			// Do NOT call m.broadcastStats() directly here.
 			// broadcastStats involves Redis I/O and loops through all rooms.
 			// If run synchronously, it blocks the Register/Unregister channels,
 			// causing a bottleneck (Head-of-Line Blocking).
+			if n := m.dropped.Swap(0); n > 0 {
+				logger.Log.Warn("Live delivery dropped", zap.Uint64("recipient_messages", n))
+			}
+			infra.ReportDeliveryFailures()
 			go m.broadcastStats()
 		}
 	}
@@ -126,39 +141,27 @@ func (m *Manager) Start() {
 
 // StartWorkers should be called inside Manager.Start()
 func (m *Manager) StartWorkers() {
-	for i := 0; i < WorkerCount; i++ {
-		go m.broadcastWorker()
+	for i, queue := range m.publishQueues {
+		go func() {
+			for packet := range queue {
+				m.handleBroadcast(packet)
+			}
+		}()
+		go m.broadcastWorker(m.deliveryQueues[i])
 	}
 }
 
-// broadcastWorker consumes jobs from the channel and sends messages to clients.
-func (m *Manager) broadcastWorker() {
-	for job := range m.broadcastJobChan {
-		// 1. Iterate and Send
-		for _, client := range job.Clients {
-			m.safeSend(client, job.Payload)
-		}
-
-	}
+func (m *Manager) roomShard(room string) int {
+	return int(maphash.String(m.shardSeed, room) % uint64(len(m.deliveryQueues)))
 }
 
-// safeSend attempts to send a message without panicking
-func (m *Manager) safeSend(client *Client, payload []byte) {
-	// no more panic cause manager will not close send channel
-	// defer func() {
-	// 	if r := recover(); r != nil {
-	// 		// Just catch the panic if the channel was closed
-	// 		// This is a last-resort protection  (though we try to avoid closing Send)
-	// 		logger.Log.Warn("[MANAGER] Panic in safeSend", zap.Any("recover", r))
-	// 	}
-	// }()
+func (m *Manager) enqueue(packet *model.WsPacket) {
+	m.publishQueues[m.roomShard(packet.RoomID)] <- packet
+}
 
-	select {
-	case client.Send <- payload:
-	default:
-		// Buffer full, skip this client
-		// In a real system, you might want to disconnect the client here.
-		logger.Log.Warn("[MANAGER] Client buffer full, dropping message", zap.Uint64("uid", client.UserID))
+func (m *Manager) broadcastWorker(queue <-chan *BroadcastJob) {
+	for job := range queue {
+		m.deliver(job)
 	}
 }
 
@@ -264,11 +267,12 @@ func (m *Manager) processDanmaku(roomID string, data []byte) {
 	// Async IO to Redis and Kafka
 
 	// 1. Persistence (Kafka)
-	infra.PushToInput(m.KafkaProducer, infra.DanmakuSaveTopic, data)
-
-	// 2. Distribution (Redis Pub/Sub)
-	// This ensures clients on other servers also receive this danmaku.
-	infra.PublishToRoom(m.RedisClient, roomID, data)
+	select {
+	case m.historyQueue <- data:
+	default:
+		infra.HistoryQueueDrops.Add(1)
+	}
+	infra.PublishToRoom(m.publisher, roomID, data)
 }
 
 // processLike handles user likes.
@@ -367,25 +371,7 @@ func (m *Manager) subscribeToRoom(ctx context.Context, roomID string) {
 	// Go channel to receive Redis messages(read only)
 	ch := pubsub.Channel()
 
-	for {
-		select {
-		case <-ctx.Done():
-			// Graceful exit when cancel() is called
-			// logger.Log.Info("[MANAGER SUB] unsubscribing to room",
-			// 	zap.String("room", roomID),
-			// )
-			return
-		// Loop over messages received from Redis.
-		// case _, ok := <-ch:
-		case msg, ok := <-ch:
-			if !ok {
-				return
-			}
-			// msg.Payload is the JSON string
-			// Now we broadcast this message to all local clients in this room.
-			m.broadcastToLocalClients(roomID, []byte(msg.Payload))
-		}
-	}
+	m.consumeRoom(ctx, roomID, ch)
 }
 
 // roomSnapshot reuses a read-only recipient list until the room membership changes.
@@ -407,9 +393,18 @@ func (m *Manager) roomSnapshot(roomID string) []*Client {
 	if len(clients) == 0 {
 		return nil
 	}
-	snapshot = make([]*Client, 0, len(clients))
+	// Group protocol versions once per membership change. Legacy receivers can
+	// then bypass the batch timer even in a mixed room.
+	snapshot = make([]*Client, len(clients))
+	front, back := 0, len(snapshot)-1
 	for client := range clients {
-		snapshot = append(snapshot, client)
+		if client.batch {
+			snapshot[front] = client
+			front++
+		} else {
+			snapshot[back] = client
+			back--
+		}
 	}
 	m.snapshots[roomID] = snapshot
 	return snapshot
@@ -420,9 +415,13 @@ func (m *Manager) broadcastToLocalClients(roomID string, payload []byte) {
 	if len(clients) == 0 {
 		return
 	}
+	m.queueJob(roomID, &BroadcastJob{Clients: clients, Packets: [][]byte{payload}})
+}
+
+func (m *Manager) queueJob(roomID string, job *BroadcastJob) {
 	select {
-	case m.broadcastJobChan <- &BroadcastJob{Clients: clients, Payload: payload}:
+	case m.deliveryQueues[m.roomShard(roomID)] <- job:
 	default:
-		logger.Log.Warn("[MANAGER] Broadcast job queue full, dropping message", zap.String("room", roomID))
+		m.dropped.Add(uint64(len(job.Packets)) * uint64(len(job.Clients)))
 	}
 }

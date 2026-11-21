@@ -3,6 +3,7 @@ package infra
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 
@@ -26,8 +27,12 @@ const (
 func InitRedisClient() *redis.Client {
 	// Initialize Redis client.
 	// Lazy loading: only create Redis client when first time trying to contact
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		addr = RedisAddr
+	}
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     RedisAddr,
+		Addr:     addr,
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
@@ -43,6 +48,7 @@ func PublishToRoom(rdb *redis.Client, roomID string, payload []byte) {
 
 	err := rdb.Publish(ctx, channel, payload).Err()
 	if err != nil {
+		redisFailures.Add(1)
 		logger.Log.Error("[REDIS INFRA] Publish failed",
 			zap.String("room", roomID),
 			zap.Error(err),
@@ -195,7 +201,7 @@ func GetRoomLikes(rdb *redis.Client, roomID string) uint64 {
 	key := fmt.Sprintf(KeyRoomLikes, roomID)
 
 	val, err := rdb.Get(ctx, key).Result()
-	if err != nil {	
+	if err != nil {
 		if err == redis.Nil {
 			return 0
 		}

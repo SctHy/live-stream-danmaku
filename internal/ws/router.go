@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"time"
 
@@ -32,11 +33,17 @@ func RegisterActionHandlers() {
 		// Client doesn't know its own ID/Avatar trustfully, Server adds it.
 		// This ensures all downstream systems (Redis, Kafka) know WHO sent it.
 		fullMsg := model.DanmakuMessage{
+			EventID: rand.Text(),
 			RoomID:  c.RoomID,
 			UserID:  c.UserID,
 			Content: inputMsg.Content,
 			//if sent successfully,set send time as accepting time
 			SendTime: time.Now(),
+		}
+
+		if !fullMsg.FitsHistory() {
+			logger.Log.Warn("Danmaku exceeds history field limits", zap.Uint64("uid", c.UserID))
+			return
 		}
 
 		// C. Wrap in outgoing Envelope
@@ -46,7 +53,7 @@ func RegisterActionHandlers() {
 			RoomID: c.RoomID,
 			Data:   dataBytes,
 		}
-		m.Broadcast <- &outgoingPacket
+		m.enqueue(&outgoingPacket)
 		// logger.Log.Debug("[SERVER HANDLER]Danmaku processed",
 		// 	zap.Uint64("uid", c.UserID),
 		// 	zap.String("room", c.RoomID),
@@ -91,7 +98,7 @@ func RegisterActionHandlers() {
 		// }
 
 		// // C. Send to Manager (Handover responsibility)
-		// m.Broadcast <- &outgoingPacket
+		// m.enqueue(&outgoingPacket)
 
 	})
 	logger.Log.Info("[SERVER HANDLER]Registered Handler: Like/Action")

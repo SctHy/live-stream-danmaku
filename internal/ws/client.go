@@ -3,6 +3,8 @@ package ws
 import (
 	"encoding/json"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
 	"github.com/charlesAcmen/livestream-danmaku/internal/model" //database structures
@@ -11,7 +13,7 @@ import (
 )
 
 const (
-	SendChanSize = 4096
+	SendChanSize = 512
 )
 
 type Client struct {
@@ -19,21 +21,24 @@ type Client struct {
 	Username string
 	RoomID   string
 
-	Socket *websocket.Conn // the websocket connection that the server holds for each client
-	Send   chan []byte     // a channel to send messages to the client
+	Socket       *websocket.Conn // the websocket connection that the server holds for each client
+	batch        bool
+	pendingBytes atomic.Int64
+	Send         chan *outboundFrame // a channel to send messages to the client
 	// done is used to signal the goroutines to stop
 	done chan struct{}
 	// once ensures that the Close operations are only performed once
 	once sync.Once
 }
 
-func NewClient(uid uint64, name, room string, conn *websocket.Conn) *Client {
+func (m *Manager) NewClient(uid uint64, name, room string, conn *websocket.Conn) *Client {
 	return &Client{
+		batch:    conn != nil && conn.Subprotocol() == model.BatchProtocol,
 		UserID:   uid,
 		Username: name,
 		RoomID:   room,
 		Socket:   conn,
-		Send:     make(chan []byte, SendChanSize),
+		Send:     make(chan *outboundFrame, m.sendCapacity),
 		done:     make(chan struct{}),
 	}
 }
@@ -94,11 +99,15 @@ func (c *Client) WritePump() {
 				return
 			}
 
-			//Note: could use NextWriter here to enable write in stream manner
-			//avoiding for too many times when huge wave of danmaku coming
-
-			// write to WebSocket
-			if err := c.Socket.WriteMessage(websocket.TextMessage, message); err != nil {
+			c.Socket.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			var err error
+			if message.prepared != nil {
+				err = c.Socket.WritePreparedMessage(message.prepared)
+			} else {
+				err = c.Socket.WriteMessage(websocket.TextMessage, message.payload)
+			}
+			c.pendingBytes.Add(-int64(len(message.payload)))
+			if err != nil {
 				logger.Log.Warn("[CLIENT] Write error",
 					zap.Uint64("uid", c.UserID), zap.Error(err))
 				return

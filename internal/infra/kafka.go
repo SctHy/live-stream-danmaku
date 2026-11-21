@@ -1,6 +1,9 @@
 package infra
 
 import (
+	"os"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -13,7 +16,23 @@ const (
 	ProducerChanBufSize = 16384
 )
 
-func InitKafkaProducer(brokers []string) sarama.AsyncProducer {
+var HistoryQueueDrops atomic.Uint64
+var kafkaFailures, redisFailures atomic.Uint64
+
+func ReportDeliveryFailures() {
+	q, k, r := HistoryQueueDrops.Swap(0), kafkaFailures.Swap(0), redisFailures.Swap(0)
+	if q+k+r > 0 {
+		logger.Log.Warn("Delivery failures since last report", zap.Uint64("history_queue_full", q), zap.Uint64("history_broker_failed", k), zap.Uint64("live_publish_failed", r))
+	}
+}
+func KafkaBrokers() []string {
+	if v := os.Getenv("KAFKA_BROKERS"); v != "" {
+		return strings.Split(v, ",")
+	}
+	return []string{"127.0.0.1:9092"}
+}
+
+func InitKafkaProducer(brokers []string) (sarama.AsyncProducer, error) {
 	// Init Kafka Producer
 	// Configure Sarama settings
 	config := sarama.NewConfig()
@@ -46,6 +65,7 @@ func InitKafkaProducer(brokers []string) sarama.AsyncProducer {
 	config.Producer.Return.Successes = false
 	//return msgs with error,otherwise have no ability to monitor KAFKA
 	config.Producer.Return.Errors = true
+	config.Producer.Retry.Max = 3
 	// multiple partitions in one topic of Kafka
 	// Use Random partitioner to distribute messages evenly in all partitions
 	config.Producer.Partitioner = sarama.NewRandomPartitioner
@@ -55,21 +75,20 @@ func InitKafkaProducer(brokers []string) sarama.AsyncProducer {
 	// producer, err := sarama.NewSyncProducer([]string{"localhost:9092"}, config)
 	producer, err := sarama.NewAsyncProducer(brokers, config)
 	if err != nil {
-		// In production, we might want to retry or fail gracefully.
-		// For now, we panic because without Kafka, persistence fails.
-		logger.Log.Panic("[KAFKA INFRA]Failed to start Kafka async producer", zap.Error(err))
+		return nil, err
 	}
 	//listen from KAFKA producer error channel
 	//if not doing so,errors will fill in channel till blocking producer
 	go func() {
 		for err := range producer.Errors() {
+			kafkaFailures.Add(1)
 			logger.Log.Error("[KAFKA INFRA] Kafka Async Write Error",
 				zap.Error(err.Err),
-				zap.Any("msg", err.Msg),
+				zap.String("topic", err.Msg.Topic),
 			)
 		}
 	}()
-	return producer
+	return producer, nil
 }
 
 // InitKafkaConsumerGroup initializes the consumer group with high-throughput settings.
@@ -104,24 +123,21 @@ func InitKafkaConsumerGroup(brokers []string, groupID string) sarama.ConsumerGro
 	return group
 }
 
-// PushToInput acts as a helper to hide the select-default logic
-func PushToInput(producer sarama.AsyncProducer, topic string, payload []byte) {
-	// Produce to Kafka (For Storage/Persistence)
-	// 'payload' is already a JSON bytes containing user info & content.
-	msg := &sarama.ProducerMessage{
-		Topic: topic,
-		//Kafka is a byte logging system that deal with binary bytes stream
-		Value: sarama.ByteEncoder(payload),
+// PublishHistory runs independently from live Redis delivery. During startup
+// outages the bounded queue absorbs messages until the broker becomes available.
+func PublishHistory(queue <-chan []byte) {
+	brokers := KafkaBrokers()
+	for {
+		producer, err := InitKafkaProducer(brokers)
+		if err != nil {
+			logger.Log.Warn("History broker unavailable", zap.Error(err))
+			time.Sleep(time.Second)
+			continue
+		}
+		for payload := range queue {
+			producer.Input() <- &sarama.ProducerMessage{Topic: DanmakuSaveTopic, Value: sarama.ByteEncoder(payload)}
+		}
+		producer.AsyncClose()
+		return
 	}
-	producer.Input() <- msg
-	// select {
-	// // Async send (Non-blocking)
-	// case producer.Input() <- msg:
-	// default:
-	// 	// [CIRCUIT BREAKER]
-	// 	// If Sarama's internal buffer (Channel) is full, we DROP the message.
-	// 	// This prevents the Manager from hanging and ensures real-time broadcast (Redis)
-	// 	// remains unaffected even if Kafka is slow or down.
-	// 	logger.Log.Warn("[KAFKA INFRA] Kafka input buffer full, dropping persistence message")
-	// }
 }

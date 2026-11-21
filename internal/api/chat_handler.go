@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
+	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/charlesAcmen/livestream-danmaku/internal/service"
 	"github.com/charlesAcmen/livestream-danmaku/internal/ws"
 	"go.uber.org/zap"
@@ -18,6 +19,7 @@ import (
 // Configure the Upgrader
 // An Upgrader converts an HTTP connection to a WebSocket connection.
 var upgrader = websocket.Upgrader{
+	Subprotocols: []string{model.BatchProtocol},
 	// CheckOrigin allows us to customize which requests are allowed to connect.
 	// By default, the Upgrader checks if the request origin matches the host.
 	CheckOrigin: func(r *http.Request) bool {
@@ -80,7 +82,7 @@ func (h *ChatHandler) ConnectWebSocket(c *gin.Context) {
 	}
 
 	// 5. Create Client
-	client := ws.NewClient(uid, name, room, conn)
+	client := h.manager.NewClient(uid, name, room, conn)
 
 	// 6. Register to Manager
 	h.manager.Register <- client

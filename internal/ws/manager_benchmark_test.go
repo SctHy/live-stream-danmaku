@@ -2,6 +2,7 @@ package ws
 
 import (
 	"fmt"
+	"hash/maphash"
 	"testing"
 )
 
@@ -13,8 +14,9 @@ func BenchmarkBroadcastDispatch(b *testing.B) {
 				members[new(Client)] = struct{}{}
 			}
 			m := Manager{
-				Rooms:            map[string]map[*Client]struct{}{"room": members},
-				broadcastJobChan: make(chan *BroadcastJob, 1),
+				Rooms:          map[string]map[*Client]struct{}{"room": members},
+				shardSeed:      maphash.MakeSeed(),
+				deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},
 			}
 			m.snapshots = make(map[string][]*Client)
 			payload := []byte("benchmark")
@@ -22,7 +24,7 @@ func BenchmarkBroadcastDispatch(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				m.broadcastToLocalClients("room", payload)
-				job := <-m.broadcastJobChan
+				job := <-m.deliveryQueues[0]
 				if len(job.Clients) != size {
 					b.Fatal("recipient count")
 				}
@@ -37,24 +39,26 @@ func BenchmarkRoomFanout(b *testing.B) {
 	members := make(map[*Client]struct{}, size)
 	clients := make([]*Client, 0, size)
 	for i := 0; i < size; i++ {
-		client := &Client{Send: make(chan []byte, 1)}
+		client := &Client{Send: make(chan *outboundFrame, 1)}
 		members[client] = struct{}{}
 		clients = append(clients, client)
 	}
 	m := Manager{
-		Rooms:            map[string]map[*Client]struct{}{"room": members},
-		broadcastJobChan: make(chan *BroadcastJob, 1),
+		Rooms:          map[string]map[*Client]struct{}{"room": members},
+		shardSeed:      maphash.MakeSeed(),
+		deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},
 	}
 	m.snapshots = make(map[string][]*Client)
-	go m.broadcastWorker()
-	defer close(m.broadcastJobChan)
+	go m.broadcastWorker(m.deliveryQueues[0])
+	defer close(m.deliveryQueues[0])
 	payload := []byte("test")
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		m.broadcastToLocalClients("room", payload)
 		for _, client := range clients {
-			<-client.Send
+			f := <-client.Send
+			client.pendingBytes.Add(-int64(len(f.payload)))
 		}
 	}
 }

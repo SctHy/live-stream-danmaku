@@ -1,17 +1,21 @@
 package ws
 
-import "testing"
+import (
+	"hash/maphash"
+	"testing"
+)
 
 func TestQueuedBroadcastKeepsOriginalMembers(t *testing.T) {
 	first := &Client{RoomID: "room"}
 	next := &Client{RoomID: "room"}
 	m := Manager{
-		Rooms:            map[string]map[*Client]struct{}{"room": {first: {}}},
-		snapshots:        make(map[string][]*Client),
-		broadcastJobChan: make(chan *BroadcastJob, 1),
+		Rooms:          map[string]map[*Client]struct{}{"room": {first: {}}},
+		snapshots:      make(map[string][]*Client),
+		shardSeed:      maphash.MakeSeed(),
+		deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},
 	}
 	m.broadcastToLocalClients("room", nil)
-	queued := <-m.broadcastJobChan
+	queued := <-m.deliveryQueues[0]
 	m.handleRegister(next)
 	if members := m.roomSnapshot("room"); len(members) != 2 {
 		t.Fatalf("after join: %d members", len(members))

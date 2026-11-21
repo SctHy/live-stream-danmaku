@@ -30,12 +30,13 @@ func main() {
 
 	// 2. init db
 	db := infra.InitDB()
+	defer db.Close()
 	logger.Log.Info("[KAFKA CONSUMER]Database initialized")
 
 	messageRepo := repo.NewMessageRepo(db)
 	handler := consumer.NewDanmakuHandler(messageRepo, BatchSize)
 
-	brokers := []string{"127.0.0.1:9092"}
+	brokers := infra.KafkaBrokers()
 
 	group := infra.InitKafkaConsumerGroup(brokers, KafkaGroupID)
 	defer group.Close()

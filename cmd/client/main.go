@@ -67,7 +67,9 @@ func main() {
 	// 2. initiate connection (handshake)
 	// Dial is like making a phone call, send a HTTP request with a header with upgrade:websocket
 	// returns a conn (connection object) when connected
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{model.BatchProtocol}
+	c, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		logger.Log.Fatal("[CLIENT]connecting failed", zap.Error(err))
 	}
@@ -85,24 +87,26 @@ func main() {
 			}
 
 			// 1. unwrap wsPacket
-			var packet model.WsPacket
-			if err := json.Unmarshal(message, &packet); err != nil {
+			packets, err := model.DecodePackets(message)
+			if err != nil {
 				continue
 			}
-			// 2.unmarshal based on type
-			switch packet.Type {
+			for _, packet := range packets {
+				// 2.unmarshal based on type
+				switch packet.Type {
 
-			case model.TypeDanmaku:
-				var danmaku model.DanmakuMessage
-				json.Unmarshal(packet.Data, &danmaku)
-				logger.Log.Info("[Live Chat]", zap.String("content", danmaku.Content))
+				case model.TypeDanmaku:
+					var danmaku model.DanmakuMessage
+					json.Unmarshal(packet.Data, &danmaku)
+					logger.Log.Info("[Live Chat]", zap.String("content", danmaku.Content))
 
-			case model.TypeStats:
-				var stats model.StatsData
-				json.Unmarshal(packet.Data, &stats)
-				logger.Log.Info("[STATS]", zap.Int("Online", int(stats.Online)), zap.Int("Likes", int(stats.Likes)))
+				case model.TypeStats:
+					var stats model.StatsData
+					json.Unmarshal(packet.Data, &stats)
+					logger.Log.Info("[STATS]", zap.Int("Online", int(stats.Online)), zap.Int("Likes", int(stats.Likes)))
+				}
+
 			}
-
 			logger.Log.Info("[CLIENT]Please input:")
 		}
 	}()

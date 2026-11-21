@@ -3,10 +3,10 @@
 > Bilibili / YouTube 级直播弹幕系统，Go 语言从零搭建，单机支撑 **6万+ 长连接**、**150万 QPS 下行广播**。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?style=flat&logo=go" alt="Go">
+  <img src="https://img.shields.io/badge/Go-1.27.4-00ADD8?style=flat&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Redis-Pub%2FSub-DC382D?style=flat&logo=redis&logoColor=white" alt="Redis">
   <img src="https://img.shields.io/badge/Kafka-Async%20Producer-231F20?style=flat&logo=apachekafka&logoColor=white" alt="Kafka">
-  <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat&logo=mysql&logoColor=white" alt="MySQL">
+  <img src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat&logo=postgresql&logoColor=white" alt="PostgreSQL">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
 </p>
 
@@ -18,7 +18,7 @@
 
 1. **高并发连接** — 几十万人同时在线，服务器如何抗住？
 2. **广播风暴** — 1 条弹幕如何实时发给同一直播间的几万用户？
-3. **削峰填谷** — 瞬时百万条弹幕，MySQL 怎么撑住不崩？
+3. **削峰填谷** — 瞬时百万条弹幕，PostgreSQL 怎么撑住不崩？
 4. **数据一致性** — 分布式环境下，在线人数、点赞数如何实时且准确？
 
 本项目是对上述问题的完整工程实践。
@@ -27,7 +27,7 @@
 
 ## 📊 性能数据
 
-在本地 WSL2 环境（模拟单机物理机）下测得：
+下表为旧版在本地 WSL2 环境的历史记录。本次 KRaft 与广播、落库改造的独立对照见[实测报告](docs/kraft-benchmarks.md)。
 
 | 指标 | 数据 |
 |------|------|
@@ -56,10 +56,10 @@
                                   │  │        WebSocket Manager         │    │
                                   │  │  ┌───────────────────────────┐  │    │
                                   │  │  │  Register / Unregister    │  │    │
-                                  │  │  │  Broadcast Channel        │  │    │
+                                  │  │  │  Per-shard publish queue  │  │    │
                                   │  │  │  Rooms Map (RoomID→Clients)│ │    │
-                                  │  │  │  100 Broadcast Workers    │  │    │
-                                  │  │  │  sync.Pool (GC 优化)      │  │    │
+                                  │  │  │  Room-sharded workers     │  │    │
+                                  │  │  │  Cached room snapshots    │  │    │
                                   │  │  └───────────────────────────┘  │    │
                                   │  └──────────┬──────────┬────────────┘    │
                                   └─────────────┼──────────┼─────────────────┘
@@ -78,8 +78,8 @@
                               │   └──────────────┘  │   └────────┬────────┘
                               └────────────────────┘            │
                                                           ┌─────▼─────┐
-                                                          │  MySQL 8.0 │
-                                                          │  (GORM)    │
+                                                          │  PG 17     │
+                                                          │  (pgxpool) │
                                                           └───────────┘
 ```
 
@@ -102,15 +102,20 @@
 
 ### 3. 📈 削峰填谷 — Kafka
 
-- **Async Producer**：作为海量弹幕的缓冲池，异步写入，不阻塞广播链路
+- **Async Producer**：独立的有界历史队列，满时记录漏存数量并继续实时发布
 - **Snappy 压缩 + 批量 Flush**：减少网络请求次数，提升吞吐
-- **Consumer Group + 批量落盘**：`dbWorker` 协程从 Channel 消费，攒够 batchSize 或超时后批量 `INSERT`，500万积压弹幕 2 分钟落盘
+- **Consumer Group + 批量落盘**：每个 Kafka 分区独立攒批，使用 PostgreSQL UNNEST 批量写入；事务成功后标记该批次的消费位点
+
+Kafka 地址可通过 `KAFKA_BROKERS` 配置，多个地址用逗号分隔。实时策略允许已显示弹幕缺少历史记录。网关会在后台连接 Kafka，启动期间暂存最多 16,384 条待提交历史消息；进程退出会丢失内存中的待提交记录。队列满、Sarama 写入失败和 Redis 发布失败分别按 3 秒周期统计。Sarama 对可重试写错误最多重试 3 次；Redis 弹幕发布仅尝试一次，以避免超时结果不明时重复广播。Redis 发布失败时已排队的历史写入仍会继续。用 Kafka 消费组的 lag 观察尚未入库的积压。
 
 ### 4. 🛡️ 广播优化
 
-- **Sharding Workers**：100 个 `broadcastWorker` 协程并行消费 Job Channel，避免单点瓶颈
-- **sync.Pool 复用 Client 切片**：减少 GC 压力，避免频繁 `make([]*Client)`
-- **非阻塞 safeSend**：Client `Send` Channel 缓冲 4096，满时跳过而非阻塞 Worker
+客户端可协商 WebSocket 子协议 `danmaku.batch.v1`，收包时兼容单个对象和对象数组；仓库自带命令行客户端已支持。旧协议逐条投递。房间达到 128 位已协商观众（可调 `-batch-min-viewers`）后，间隔不超过 2 ms 的连续到达触发合批，默认最多等待 5 ms、32 条或 32 KiB，先到即发。稀疏消息直接发送。服务端参数 `-batch-window 0` 关闭合批，`-prepared=true` 开启跨连接共享预制帧。实测与故障语义见[广播与存储验证](docs/fanout-benchmarks.md)。
+
+
+- **Sharding Workers**：32 个房间哈希分片，各自串行处理发布和下行分发；同分片房间共享队列
+- **缓存房间成员快照**：成员变更后重建，广播间复用
+- **非阻塞 safeSend**：每连接默认最多缓冲 512 帧，待写数据上限 256 KiB，超过任一上限按包数记录丢弃。单次 socket 写超时为 5 秒
 - **读写锁分离**：`RLock` 广播遍历 + `Lock` 注册/注销，广播不阻塞连接管理
 
 ---
@@ -128,13 +133,13 @@
 ├── internal/
 │   ├── api/             # Handler 层 (Gin Controller + WebSocket Upgrade)
 │   ├── service/         # Service 层 (业务逻辑)
-│   ├── repo/            # Repo 层 (GORM 数据访问)
+│   ├── repo/            # Repo 层 (pgxpool 与参数化 SQL)
 │   ├── model/           # 数据模型 (WsPacket / DanmakuMessage / StatsData / Like)
 │   ├── ws/              # WebSocket 核心 (Manager / Client / Dispatcher / Router)
 │   ├── consumer/        # Kafka 消费者 Handler (批量落盘 + 重试)
-│   ├── infra/           # 基础设施 (Redis / Kafka / MySQL 初始化)
+│   ├── infra/           # 基础设施 (Redis / Kafka / PostgreSQL 初始化)
 │   └── logger/          # Zap 日志 (dev 彩色 / prod JSON)
-├── docker-compose.yaml  # 一键启动 Redis + MySQL + Zookeeper + Kafka
+├── docker-compose.yaml  # 一键启动 Redis + PostgreSQL + Kafka (KRaft)
 ├── go.mod
 └── go.sum
 ```
@@ -165,16 +170,26 @@
 
 ### 前置依赖
 
-- Go 1.25+
+- Go 1.27.4+
 - Docker & Docker Compose
 
 ### 1. 启动基础设施
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-将启动 Redis (6379)、MySQL (3306)、Zookeeper (2181)、Kafka (9092)。
+将启动 Redis (6379)、PostgreSQL (5432)、单节点 Kafka KRaft (9092)。宿主机应用连接 127.0.0.1:9092，同一 Compose 网络内连接 kafka:29092。Kafka 数据和消费组位点保存在 kafka_data 命名卷。旧 ZooKeeper 部署如有待保留的日志或位点，应先按 [Kafka 元数据迁移说明](https://kafka.apache.org/39/operations/kraft/) 完成迁移；新卷启动的是空集群。
+
+如果本机 6379 已占用，可以用 `REDIS_PORT=26379 docker compose up -d`，并在运行弹幕服务时设置 `REDIS_ADDR=127.0.0.1:26379`。
+
+PostgreSQL 使用命名卷 `postgres_data` 保存历史记录。默认连接为 `postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable`。连接其他实例时，请为服务端和消费者设置同一个 `DATABASE_URL`。两个进程启动时通过 pgxpool 在事务锁内执行尚未登记的版本化 SQL，版本记录保存在 `danmaku_schema_migrations`。基线迁移可接管既有表，历史记录允许 event_id 为空。
+
+可用以下命令进入数据库练习 SQL：
+
+```bash
+docker compose exec postgres psql -U danmaku -d danmaku_db
+```
 
 ### 2. 启动弹幕服务器
 
@@ -216,16 +231,15 @@ go run cmd/benchmark/kafka/kafka.go
 | 参数 | 值 | 说明 |
 |------|----|------|
 | `BroadCastInterVal` | 3s | 统计广播间隔 |
-| `BroadcastChanSize` | 1024 | Broadcast Channel 缓冲 |
-| `BroadcastJobChanSize` | 1000 | Worker Job Channel 缓冲 |
-| `WorkerCount` | 100 | 广播 Worker 协程数 |
-| `InitClientPoolCap` | 500 | sync.Pool 初始切片容量 |
+| `BroadcastChanSize` | 1024 | 发布缓冲总预算，各分片均分 |
+| `BroadcastJobChanSize` | 1000 | 下行任务缓冲总预算，均分后向上取整 |
+| `RoomShards` | 32 | 发布和分发的房间分片数 |
 
 ### Client 常量 (`internal/ws/client.go`)
 
 | 参数 | 值 | 说明 |
 |------|----|------|
-| `SendChanSize` | 4096 | 单客户端发送缓冲 |
+| `SendChanSize` | 512 | 单客户端发送缓冲，可用服务端参数 `-send-queue 128` 等覆盖 |
 
 ### Kafka Producer 常量 (`internal/infra/kafka.go`)
 
@@ -241,9 +255,7 @@ go run cmd/benchmark/kafka/kafka.go
 | 参数 | 值 | 说明 |
 |------|----|------|
 | `FlushInterval` | 2s | DB 刷盘间隔 |
-| `MaxDBRetries` | 3 | DB 写入重试次数 |
-| `ChannelBufferSize` | 2000 | 消费者→Worker Channel 缓冲 |
-| `BackoffDuration` | 500ms | 重试退避时间 |
+| 写入重试间隔 | 1s | 当前分区等待数据库恢复；消费会话结束时释放分区 |
 
 ---
 
@@ -267,7 +279,7 @@ Client ──WS──► Handler ──► Router (TypeDanmaku)
                                   broadcastToLocalClients
                                            │
                                            ▼
-                                  100 Workers ──► Client.Send
+                                  房间分片 Worker ──► Client.Send
 ```
 
 ### 在线人数 / 点赞数广播流程
@@ -292,9 +304,9 @@ broadcastToLocalClients (TypeStats)
 ## 📌 技术亮点
 
 - **信封协议设计**：`WsPacket` + `json.RawMessage` 延迟解析，路由层无需反序列化内部数据
-- **双缓冲落盘**：Consumer `dbWorker` 攒批写入，`buffer[:0]` 复用底层数组，零分配
-- **优雅退出**：Client `sync.Once` + `done` Channel；Consumer `Cleanup` 关闭 `msgChan` + `wg.Wait` 确保数据刷完
-- **Kafka 背压**：`msgChan` 满时阻塞 `ConsumeClaim`，自然限速
+- **历史幂等**：服务端为弹幕生成 event_id，旧格式消息使用 Kafka 主题、分区和位点生成幂等键。
+- **消费恢复**：会话结束后从已提交位点继续，重复批次通过 PostgreSQL 唯一索引去重。
+- **Kafka 背压**：数据库持续写入失败时暂停该分区推进，待修复后重试。
 - **Server 心跳**：Redis Key 带 TTL，Server 宕机后自动清理，在线数自动修正
 
 ---

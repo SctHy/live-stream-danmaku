@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	fmt.Println("Hello, World! From Go 1.25")
+	fmt.Println("Go version:", runtime.Version())
 	fmt.Println("NumCPU:", runtime.NumCPU())
 	fmt.Println("GOMAXPROCS:", runtime.GOMAXPROCS(0))
 }

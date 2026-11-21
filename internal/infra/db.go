@@ -1,40 +1,71 @@
 package infra
 
 import (
+	"context"
+	"embed"
+	"fmt"
+	"os"
+	"time"
+
 	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
-// InitDB connect to db and return db instance
-func InitDB() *gorm.DB {
-	dsn := "root:root@tcp(127.0.0.1:3306)/danmaku_db?charset=utf8mb4&parseTime=True&loc=Local"
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+func InitDB() *pgxpool.Pool {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		logger.Log.Fatal("[DB INFRA]Failed to connect to database", zap.Error(err))
+		logger.Log.Fatal("Invalid PostgreSQL configuration", zap.Error(err))
 	}
+	if err := migrate(ctx, pool); err != nil {
+		pool.Close()
+		logger.Log.Fatal("PostgreSQL migration failed", zap.Error(err))
+	}
+	return pool
+}
 
-	if err := db.Migrator().DropTable(&model.DanmakuMessage{}); err != nil {
-		logger.Log.Error("[DB INFRA]Drop table DanmakuMessage failed", zap.Error(err))
-	}
-	if err := db.Migrator().DropTable(&model.Room{}); err != nil {
-		logger.Log.Error("[DB INFRA]Drop table Room failed", zap.Error(err))
-	}
-	if err := db.Migrator().DropTable(&model.User{}); err != nil {
-		logger.Log.Error("[DB INFRA]Drop table User failed", zap.Error(err))
-	}
-
-	// Auto-Migrate (Create tables if not exist)
-	if err := db.AutoMigrate(&model.DanmakuMessage{}); err != nil {
-		logger.Log.Fatal("[DB INFRA]Database table DanmakuMessage migration failed", zap.Error(err))
-	}
-	if err := db.AutoMigrate(&model.Room{}); err != nil {
-		logger.Log.Fatal("[DB INFRA]Database table Room migration failed", zap.Error(err))
-	}
-	if err := db.AutoMigrate(&model.User{}); err != nil {
-		logger.Log.Fatal("[DB INFRA]Database table User migration failed", zap.Error(err))
-	}
-	return db
+// Version files are applied in lexical order under the same lock as the old AutoMigrate.
+func migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(1684106861, 1)"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS danmaku_schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"); err != nil {
+			return err
+		}
+		files, err := migrations.ReadDir("migrations")
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			var applied bool
+			if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM danmaku_schema_migrations WHERE version=$1)", file.Name()).Scan(&applied); err != nil {
+				return err
+			}
+			if applied {
+				continue
+			}
+			script, err := migrations.ReadFile("migrations/" + file.Name())
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, string(script)); err != nil {
+				return fmt.Errorf("%s: %w", file.Name(), err)
+			}
+			if _, err := tx.Exec(ctx, "INSERT INTO danmaku_schema_migrations(version) VALUES ($1)", file.Name()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

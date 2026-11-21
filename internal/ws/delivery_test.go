@@ -1,0 +1,60 @@
+package ws
+
+import (
+	"context"
+	"hash/maphash"
+	"testing"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+func TestMixedFanoutAndBudget(t *testing.T) {
+	m := Manager{Prepared: true}
+	legacy := &Client{Send: make(chan *outboundFrame, 3)}
+	a := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
+	b := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
+	job := &BroadcastJob{Clients: []*Client{legacy, a, b}, Packets: [][]byte{[]byte(`{"n":1}`), []byte(`{"n":2}`)}}
+	m.deliver(job)
+	frame := <-a.Send
+	if frame != <-b.Send || frame.prepared == nil || string(frame.payload) != `[{"n":1},{"n":2}]` || frame.count != 2 {
+		t.Fatal("batch not shared or out of order")
+	}
+	for _, p := range job.Packets {
+		if f := <-legacy.Send; string(f.payload) != string(p) || f.count != 1 {
+			t.Fatal("legacy packet changed")
+		}
+	}
+	a.pendingBytes.Store(maxQueuedBytes - 1)
+	m.safeSend(a, frame)
+	if m.dropped.Load() != 2 || len(a.Send) != 0 || a.pendingBytes.Load() != maxQueuedBytes-1 {
+		t.Fatal("byte limit or drop count")
+	}
+}
+
+func TestRoomBatchDrainsInOrder(t *testing.T) {
+	c := &Client{batch: true}
+	m := Manager{Rooms: map[string]map[*Client]struct{}{"r": {c: {}}}, snapshots: make(map[string][]*Client), BatchWindow: time.Hour, shardSeed: maphash.MakeSeed(), deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 100)}}
+	in := make(chan *redis.Message, 80)
+	for i := range 80 {
+		in <- &redis.Message{Payload: string(rune('A' + i))}
+	}
+	close(in)
+	m.consumeRoom(context.Background(), "r", in)
+	total := 0
+	for len(m.deliveryQueues[0]) > 0 {
+		job := <-m.deliveryQueues[0]
+		if len(job.Packets) > maxBatchMessages || total == 0 && len(job.Packets) != 1 {
+			t.Fatal("burst boundaries")
+		}
+		for _, p := range job.Packets {
+			if string(p) != string(rune('A'+total)) {
+				t.Fatal("order")
+			}
+			total++
+		}
+	}
+	if total != 80 {
+		t.Fatal(total)
+	}
+}
