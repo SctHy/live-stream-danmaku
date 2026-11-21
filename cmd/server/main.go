@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 	"net"
 	"net/http"
 	"os"
@@ -13,10 +14,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/scthy/live-stream-danmaku/internal/api"
+	"github.com/scthy/live-stream-danmaku/internal/hub"
 	"github.com/scthy/live-stream-danmaku/internal/infra"
 	"github.com/scthy/live-stream-danmaku/internal/logger"
 	"github.com/scthy/live-stream-danmaku/internal/repo"
-	"github.com/scthy/live-stream-danmaku/internal/ws"
 	"go.uber.org/zap"
 )
 
@@ -25,11 +26,11 @@ func main() {
 	defer logger.Sync()
 	host := flag.String("host", "127.0.0.1", "listen address")
 	port := flag.String("port", "8080", "HTTP port")
-	capacity := flag.Int("send-queue", ws.SendChanSize, "maximum frames per connection")
+	capacity := flag.Int("send-queue", hub.SendChanSize, "maximum frames per connection")
 	window := flag.Duration("batch-window", 5*time.Millisecond, "maximum hot-room coalescing delay")
-	gap := flag.Duration("batch-arrival-gap", ws.DefaultBatchArrivalGap, "maximum interval between arrivals to start a batch")
+	gap := flag.Duration("batch-arrival-gap", hub.DefaultBatchArrivalGap, "maximum interval between arrivals to start a batch")
 	minViewers := flag.Int("batch-min-viewers", 128, "minimum batch-capable viewers")
-	shards := flag.Int("room-shards", ws.RoomShards, "number of room workers")
+	shards := flag.Int("room-shards", hub.RoomShards, "number of room workers")
 	migrationTimeout := flag.Duration("migration-timeout", 30*time.Second, "maximum time for rolling handoff (zero closes immediately)")
 	migrationBatch := flag.Int("migration-batch", 100, "maximum handoff invitations per 100ms")
 	migrationLimit := flag.Int("migration-inflight", 64, "maximum outstanding handoffs (zero uses fixed rate)")
@@ -41,7 +42,9 @@ func main() {
 	}
 	db := infra.InitDB()
 	defer db.Close()
-	m := ws.NewManager(*capacity, *shards, *muxShards)
+	sessions := pubsub.Open(os.Getenv("REDIS_ADDR"))
+	defer sessions.Close()
+	m := hub.New(sessions, *capacity, *shards, *muxShards)
 	m.BatchWindow = *window
 	m.BatchArrivalGap = *gap
 	m.MinBatchViewers = *minViewers
@@ -49,7 +52,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	api.NewChatHandler(repo.NewMessageRepo(db), m, *allowDev).Routes(r)
+	api.NewChatHandler(repo.NewMessageRepo(db), m, sessions, *allowDev).Routes(r)
 	r.GET("/livez", func(c *gin.Context) { c.Status(200) })
 	r.GET("/readyz", func(c *gin.Context) {
 		if m.Retiring() {
@@ -58,7 +61,7 @@ func main() {
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
 		defer cancel()
-		if err := m.RedisClient.Ping(ctx).Err(); err != nil {
+		if err := sessions.Ping(ctx); err != nil {
 			c.Status(503)
 			return
 		}
@@ -68,7 +71,7 @@ func main() {
 		}
 		c.Status(200)
 	})
-	r.GET("/metrics", func(c *gin.Context) { c.JSON(200, m.Metrics()) })
+	r.GET("/metrics", func(c *gin.Context) { c.JSON(200, m.Counters()) })
 	srv := http.Server{Addr: net.JoinHostPort(*host, *port), Handler: r, ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

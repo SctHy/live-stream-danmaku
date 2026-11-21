@@ -1,4 +1,4 @@
-package infra
+package pubsub
 
 import (
 	"context"
@@ -18,6 +18,7 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 	}
 	r := redis.NewClient(&redis.Options{Addr: addr})
 	defer r.Close()
+	store := Store{r}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	room := "check/" + rand.Text()
@@ -27,13 +28,13 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 		t.Helper()
 		data, _ := json.Marshal(map[string]string{"content": "hello", "event_id": id})
 		packet, _ := json.Marshal(protocol.WsPacket{Type: kind, Data: data})
-		if err := Journal(ctx, r, room, packet); err != nil {
+		if err := store.Journal(ctx, room, packet); err != nil {
 			t.Fatal(err)
 		}
 	}
 	recoverFrom := func(pos string) Recovery {
 		t.Helper()
-		res, err := Recover(ctx, r, room, pos)
+		res, err := store.Recover(ctx, room, pos)
 		if err != nil {
 			t.Fatal(err)
 		}

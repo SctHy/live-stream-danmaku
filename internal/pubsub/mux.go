@@ -28,7 +28,7 @@ type Mux struct {
 	workers sync.WaitGroup
 }
 
-func NewMux(ctx context.Context, r *redis.Client, count int) *Mux {
+func NewMux(ctx context.Context, r redis.UniversalClient, count int) *Mux {
 	m := &Mux{seed: maphash.MakeSeed(), shards: make([]shard, count)}
 	for i := range m.shards {
 		s := &m.shards[i]

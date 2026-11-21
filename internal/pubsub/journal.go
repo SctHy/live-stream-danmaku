@@ -1,4 +1,4 @@
-package infra
+package pubsub
 
 import (
 	"context"
@@ -29,7 +29,8 @@ redis.call('PUBLISH',KEYS[2],wire)
 
 var appendEvent = redis.NewScript(journalLua + `return id`)
 
-func Journal(ctx context.Context, r *redis.Client, room string, payload []byte) error {
+func (s *Store) Journal(ctx context.Context, room string, payload []byte) error {
+	r := s.r
 	return appendEvent.Run(ctx, r, []string{"dm:{" + room + "}:recent", fmt.Sprintf(KeyRoomPubSub, room)}, string(payload), rand.Text()).Err()
 }
 
@@ -45,7 +46,8 @@ redis.call('SET',KEYS[3],ARGV[3],'EX',600)
 return {'new',ARGV[3]}
 `)
 
-func AcceptDanmaku(ctx context.Context, r *redis.Client, msg protocol.DanmakuMessage, payload []byte) (string, string, error) {
+func (s *Store) AcceptDanmaku(ctx context.Context, msg protocol.DanmakuMessage, payload []byte) (string, string, error) {
+	r := s.r
 	prefix := fmt.Sprintf("dm:{%s}:", msg.RoomID)
 	user := fmt.Sprint(msg.UserID)
 	request := msg.ClientMsgID
@@ -72,7 +74,8 @@ type Recovery struct {
 	Reset    bool                `json:"reset"`
 }
 
-func Recover(ctx context.Context, r *redis.Client, room, after string) (Recovery, error) {
+func (s *Store) Recover(ctx context.Context, room, after string) (Recovery, error) {
+	r := s.r
 	entries, err := r.XRange(ctx, "dm:{"+room+"}:recent", "-", "+").Result()
 	out := Recovery{Events: []protocol.WsPacket{}, Position: "0-0", Reset: after != "" && after != "0-0"}
 	if err != nil {
@@ -146,7 +149,8 @@ if n==1 then redis.call('PEXPIRE',KEYS[2],ARGV[1]) end
 if n>tonumber(ARGV[2]) then return 'rate_limited' end
 return 'ok'`)
 
-func Policy(ctx context.Context, r *redis.Client, room string, uid uint64, action int) (string, error) {
+func (s *Store) Policy(ctx context.Context, room string, uid uint64, action int) (string, error) {
+	r := s.r
 	prefix := fmt.Sprintf("dm:{%s}:", room)
 	user := fmt.Sprint(uid)
 	return allowAction.Run(ctx, r, []string{prefix + "mute:" + user, prefix + fmt.Sprintf("rate:%s:%d", user, action)}, time.Second.Milliseconds(), 8).Text()

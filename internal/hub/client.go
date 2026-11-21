@@ -1,4 +1,4 @@
-package ws
+package hub
 
 import (
 	"encoding/json"
@@ -14,6 +14,9 @@ import (
 
 const (
 	SendChanSize = 512
+	PongWait     = 60 * time.Second
+	PingPeriod   = 30 * time.Second
+	WriteWait    = 5 * time.Second
 )
 
 type Client struct {
@@ -36,7 +39,7 @@ type Client struct {
 	once sync.Once
 }
 
-func (m *Manager) NewClient(uid uint64, name, room string, conn *websocket.Conn) *Client {
+func (m *Hub) NewClient(uid uint64, name, room string, conn *websocket.Conn) *Client {
 	return &Client{
 		registered: make(chan struct{}),
 		stats:      make(chan *outboundFrame, 1),
@@ -54,7 +57,7 @@ func (m *Manager) NewClient(uid uint64, name, room string, conn *websocket.Conn)
 func (c *Client) EnableMigration() { c.migration = make(chan struct{}, 1) }
 
 // ReadPump: clients read from websocket to receive message, then send to manager to broadcast
-func (c *Client) ReadPump(manager *Manager) {
+func (c *Client) ReadPump(manager *Hub) {
 	defer func() {
 		// if read failed (client disconnected), unregister the client
 		manager.Leave(c)
@@ -62,6 +65,8 @@ func (c *Client) ReadPump(manager *Manager) {
 	}()
 
 	c.Socket.SetReadLimit(8192)
+	c.Socket.SetReadDeadline(time.Now().Add(PongWait))
+	c.Socket.SetPongHandler(func(string) error { return c.Socket.SetReadDeadline(time.Now().Add(PongWait)) })
 	for {
 		// 1. read message from WebSocket
 		_, messageBytes, err := c.Socket.ReadMessage()
@@ -98,19 +103,26 @@ func (c *Client) WritePump() {
 		c.Socket.Close()
 	}()
 
+	ping := time.NewTicker(PingPeriod)
+	defer ping.Stop()
 	for {
 		var message *outboundFrame
 		var chat bool
 		select {
 		case <-c.done:
 			return
+		case <-ping.C:
+			if err := c.Socket.WriteControl(websocket.PingMessage, nil, time.Now().Add(WriteWait)); err != nil {
+				return
+			}
+			continue
 		case message = <-c.Send:
 			chat = true
 		case <-c.migration:
 			message = migrationNotice()
 		case message = <-c.stats:
 		}
-		c.Socket.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		c.Socket.SetWriteDeadline(time.Now().Add(WriteWait))
 		err := c.Socket.WriteMessage(websocket.TextMessage, message.payload)
 		if chat {
 			c.pendingBytes.Add(-int64(len(message.payload)))

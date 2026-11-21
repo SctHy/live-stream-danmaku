@@ -1,4 +1,4 @@
-package infra
+package pubsub
 
 import (
 	"context"
@@ -12,7 +12,8 @@ import (
 )
 
 // SnapshotStats batches network round trips across rooms. Callers bound each chunk.
-func SnapshotStats(ctx context.Context, r *redis.Client, server string, rooms map[string]int, likes map[string]uint64, ttl time.Duration) (map[string]protocol.StatsData, error) {
+func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[string]int, likes map[string]uint64, ttl time.Duration) (map[string]protocol.StatsData, error) {
+	r := s.r
 	p := r.Pipeline()
 	owners := make(map[string]*redis.StringSliceCmd)
 	counts := make(map[string]*redis.StringCmd)

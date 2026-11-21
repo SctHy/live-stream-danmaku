@@ -20,9 +20,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
-	"github.com/scthy/live-stream-danmaku/internal/infra"
+	"github.com/scthy/live-stream-danmaku/internal/hub"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
-	"github.com/scthy/live-stream-danmaku/internal/ws"
+	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 )
 
 //go:embed web/*
@@ -37,12 +37,13 @@ type historyStore interface {
 
 type ChatHandler struct {
 	history  historyStore
-	manager  *ws.Manager
+	manager  *hub.Hub
+	sessions *pubsub.Store
 	allowDev bool
 }
 
-func NewChatHandler(history historyStore, m *ws.Manager, allowDev bool) *ChatHandler {
-	return &ChatHandler{history, m, allowDev}
+func NewChatHandler(history historyStore, m *hub.Hub, sessions *pubsub.Store, allowDev bool) *ChatHandler {
+	return &ChatHandler{history, m, sessions, allowDev}
 }
 
 func (h *ChatHandler) Routes(r *gin.Engine) {
@@ -86,7 +87,7 @@ func (h *ChatHandler) identity(c *gin.Context) (uint64, error) {
 	if err != nil || len(token) < 26 || len(token) > 80 {
 		return 0, redis.Nil
 	}
-	return h.manager.RedisClient.Get(c.Request.Context(), "dm:guest:"+token).Uint64()
+	return h.sessions.Guest(c.Request.Context(), token)
 }
 func (h *ChatHandler) session(c *gin.Context) {
 	if !sameOrigin(c.Request) {
@@ -103,7 +104,7 @@ func (h *ChatHandler) session(c *gin.Context) {
 		uid = n.Uint64() + 1
 		token := rand.Text()
 		ttl := 24 * time.Hour
-		err = h.manager.RedisClient.Set(c.Request.Context(), "dm:guest:"+token, uid, ttl).Err()
+		err = h.sessions.SaveGuest(c.Request.Context(), token, uid, ttl)
 		if err == nil {
 			http.SetCookie(c.Writer, &http.Cookie{Name: "danmaku_guest", Value: token, Path: "/", MaxAge: int(ttl.Seconds()), HttpOnly: true, Secure: c.Request.TLS != nil, SameSite: http.SameSiteStrictMode})
 		}
@@ -166,7 +167,7 @@ func (h *ChatHandler) connect(c *gin.Context, uid uint64, room string) {
 	client.ReadPump(h.manager)
 }
 func (h *ChatHandler) recent(c *gin.Context) {
-	out, err := infra.Recover(c.Request.Context(), h.manager.RedisClient, c.GetString("room"), c.Query("after"))
+	out, err := h.sessions.Recover(c.Request.Context(), c.GetString("room"), c.Query("after"))
 	if err != nil {
 		c.Status(503)
 		return
@@ -216,7 +217,7 @@ func (h *ChatHandler) moderate(c *gin.Context) {
 			c.Status(400)
 			return
 		}
-		err = h.manager.RedisClient.Set(ctx, "dm:{"+room+"}:mute:"+strconv.FormatUint(in.UserID, 10), 1, time.Duration(in.Seconds)*time.Second).Err()
+		err = h.sessions.Mute(ctx, room, in.UserID, time.Duration(in.Seconds)*time.Second)
 	case "withdraw":
 		if len(in.EventID) < 26 || len(in.EventID) > 80 {
 			c.Status(400)
@@ -226,7 +227,7 @@ func (h *ChatHandler) moderate(c *gin.Context) {
 		if err == nil {
 			data, _ := json.Marshal(protocol.Withdraw{EventID: in.EventID})
 			packet, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeWithdraw, RoomID: room, Data: data})
-			err = infra.Journal(ctx, h.manager.RedisClient, room, packet)
+			err = h.sessions.Journal(ctx, room, packet)
 		}
 	default:
 		c.Status(400)

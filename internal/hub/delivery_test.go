@@ -1,16 +1,14 @@
-package ws
+package hub
 
 import (
 	"context"
 	"hash/maphash"
 	"testing"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 func TestMixedFanoutAndBudget(t *testing.T) {
-	m := Manager{}
+	m := Hub{}
 	legacy := &Client{Send: make(chan *outboundFrame, 3)}
 	a := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
 	b := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
@@ -34,10 +32,10 @@ func TestMixedFanoutAndBudget(t *testing.T) {
 
 func TestRoomBatchDrainsInOrder(t *testing.T) {
 	c := &Client{batch: true}
-	m := Manager{Rooms: map[string]map[*Client]struct{}{"r": {c: {}}}, snapshots: make(map[string][]*Client), BatchWindow: time.Hour, BatchArrivalGap: time.Second, shardSeed: maphash.MakeSeed(), deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 100)}}
-	in := make(chan *redis.Message, 80)
+	m := Hub{Rooms: map[string]map[*Client]struct{}{"r": {c: {}}}, snapshots: make(map[string][]*Client), BatchWindow: time.Hour, BatchArrivalGap: time.Second, shardSeed: maphash.MakeSeed(), deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 100)}}
+	in := make(chan []byte, 80)
 	for i := range 80 {
-		in <- &redis.Message{Payload: string(rune('A' + i))}
+		in <- []byte(string(rune('A' + i)))
 	}
 	close(in)
 	m.consumeRoom(context.Background(), "r", in)
@@ -72,7 +70,7 @@ func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &Client{batch: true}
 			jobs := make(chan *BroadcastJob, 3)
-			m := Manager{
+			m := Hub{
 				Rooms:           map[string]map[*Client]struct{}{"r": {c: {}}},
 				snapshots:       make(map[string][]*Client),
 				deliveryQueues:  []chan *BroadcastJob{jobs},
@@ -81,9 +79,9 @@ func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
 				BatchArrivalGap: tc.gap,
 				MinBatchViewers: tc.minimum,
 			}
-			messages := make(chan *redis.Message, 3)
+			messages := make(chan []byte, 3)
 			for _, p := range []string{"a", "b", "c"} {
-				messages <- &redis.Message{Payload: p}
+				messages <- []byte(p)
 			}
 			close(messages)
 			m.consumeRoom(context.Background(), "r", messages)
@@ -98,7 +96,7 @@ func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
 }
 
 func TestStalledViewerAndLatestStats(t *testing.T) {
-	m := Manager{sendCapacity: 1}
+	m := Hub{sendCapacity: 1}
 	stalled := m.NewClient(1, "", "room", nil)
 	frame := m.frame([]byte("hello"), 1)
 	m.safeSend(stalled, frame)
@@ -111,7 +109,7 @@ func TestStalledViewerAndLatestStats(t *testing.T) {
 		t.Fatal("stalled viewer still connected")
 	}
 	if m.clientDrops.Load() != 8 || m.shardDrops.Load() != 0 {
-		t.Fatal(m.Metrics())
+		t.Fatal(m.Counters())
 	}
 	healthy := m.NewClient(2, "", "room", nil)
 	healthy.setStats(frame)

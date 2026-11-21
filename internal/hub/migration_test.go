@@ -1,4 +1,4 @@
-package ws
+package hub
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 func TestMigrationWaitsForOldConnectionOrDeadline(t *testing.T) {
 	first := &Client{migration: make(chan struct{}, 1), done: make(chan struct{})}
 	second := &Client{migration: make(chan struct{}, 1), done: make(chan struct{})}
-	m := Manager{Rooms: map[string]map[*Client]struct{}{"room": {first: {}, second: {}}}}
+	m := Hub{Rooms: map[string]map[*Client]struct{}{"room": {first: {}, second: {}}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	done := make(chan struct{})

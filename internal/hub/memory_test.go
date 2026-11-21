@@ -1,4 +1,4 @@
-package ws
+package hub
 
 import (
 	"strconv"
@@ -8,7 +8,7 @@ import (
 func BenchmarkConnectionAllocation(b *testing.B) {
 	for _, capacity := range []int{128, SendChanSize, 4096} {
 		b.Run(strconv.Itoa(capacity), func(b *testing.B) {
-			m := Manager{sendCapacity: capacity}
+			m := Hub{sendCapacity: capacity}
 			b.ReportAllocs()
 			for b.Loop() {
 				c := m.NewClient(1, "user", "room", nil)

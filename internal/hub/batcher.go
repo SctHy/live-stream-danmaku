@@ -1,9 +1,8 @@
-package ws
+package hub
 
 import (
 	"bytes"
 	"context"
-	"github.com/redis/go-redis/v9"
 	"sort"
 	"time"
 )
@@ -20,11 +19,11 @@ type outboundFrame struct {
 	count   int
 }
 
-func (m *Manager) frame(payload []byte, count int) *outboundFrame {
+func (m *Hub) frame(payload []byte, count int) *outboundFrame {
 	return &outboundFrame{payload: payload, count: count}
 }
 
-func (m *Manager) deliver(job *BroadcastJob) {
+func (m *Hub) deliver(job *BroadcastJob) {
 	var batch *outboundFrame
 	var singles []*outboundFrame
 	for _, c := range job.Clients {
@@ -48,7 +47,7 @@ func (m *Manager) deliver(job *BroadcastJob) {
 	}
 }
 
-func (m *Manager) safeSend(c *Client, f *outboundFrame) {
+func (m *Hub) safeSend(c *Client, f *outboundFrame) {
 	size := int64(len(f.payload))
 	if c.pendingBytes.Add(size) <= maxQueuedBytes {
 		select {
@@ -68,7 +67,7 @@ func (m *Manager) safeSend(c *Client, f *outboundFrame) {
 
 // Only consecutive arrivals in a busy room start a batch. An idle room sends
 // its first packet immediately. Each job retains its original member snapshot.
-func (m *Manager) consumeRoom(ctx context.Context, room string, ch <-chan *redis.Message) {
+func (m *Hub) consumeRoom(ctx context.Context, room string, ch <-chan []byte) {
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	defer timer.Stop()
@@ -101,7 +100,7 @@ func (m *Manager) consumeRoom(ctx context.Context, room string, ch <-chan *redis
 			if len(members) == 0 {
 				continue
 			}
-			payload := []byte(msg.Payload)
+			payload := msg
 			if !members[len(members)-1].batch {
 				split := sort.Search(len(members), func(i int) bool { return !members[i].batch })
 				m.queueJob(room, &BroadcastJob{Clients: members[split:], Packets: [][]byte{payload}})

@@ -1,4 +1,4 @@
-package ws
+package hub
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ func BenchmarkBroadcastDispatch(b *testing.B) {
 			for i := 0; i < size; i++ {
 				members[new(Client)] = struct{}{}
 			}
-			m := Manager{
+			m := Hub{
 				Rooms:          map[string]map[*Client]struct{}{"room": members},
 				shardSeed:      maphash.MakeSeed(),
 				deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},
@@ -43,7 +43,7 @@ func BenchmarkRoomFanout(b *testing.B) {
 		members[client] = struct{}{}
 		clients = append(clients, client)
 	}
-	m := Manager{
+	m := Hub{
 		Rooms:          map[string]map[*Client]struct{}{"room": members},
 		shardSeed:      maphash.MakeSeed(),
 		deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},

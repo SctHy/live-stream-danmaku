@@ -1,4 +1,4 @@
-package ws
+package hub
 
 import (
 	"context"
@@ -13,19 +13,19 @@ import (
 	"go.uber.org/zap"
 )
 
-func (m *Manager) reply(c *Client, id, status string) {
+func (m *Hub) reply(c *Client, id, status string) {
 	m.receipt(c, id, status, "")
 }
-func (m *Manager) receipt(c *Client, id, status, eventID string) {
+func (m *Hub) receipt(c *Client, id, status, eventID string) {
 	data, _ := json.Marshal(protocol.Receipt{ClientMsgID: id, Status: status, EventID: eventID})
 	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeReceipt, Data: data})
 	m.safeSend(c, m.frame(wire, 1))
 }
 
-func (m *Manager) permitted(c *Client, action int, id string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+func (m *Hub) permitted(c *Client, action int, id string) bool {
+	ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
 	defer cancel()
-	status, err := infra.Policy(ctx, m.RedisClient, c.RoomID, c.UserID, action)
+	status, err := m.store.Policy(ctx, c.RoomID, c.UserID, action)
 	if err != nil {
 		status = "unavailable"
 	}
@@ -36,7 +36,7 @@ func (m *Manager) permitted(c *Client, action int, id string) bool {
 	return true
 }
 
-func (m *Manager) dispatch(c *Client, packet protocol.WsPacket) {
+func (m *Hub) dispatch(c *Client, packet protocol.WsPacket) {
 	switch packet.Type {
 	case protocol.TypeDanmaku:
 		m.handleDanmaku(c, packet.Data)
@@ -47,7 +47,7 @@ func (m *Manager) dispatch(c *Client, packet protocol.WsPacket) {
 	}
 }
 
-func (m *Manager) handleDanmaku(c *Client, data []byte) {
+func (m *Hub) handleDanmaku(c *Client, data []byte) {
 	var input protocol.DanmakuMessage
 	if json.Unmarshal(data, &input) != nil || !input.FitsHistory() ||
 		strings.TrimSpace(input.Content) == "" || len(input.ClientMsgID) > 80 ||
@@ -65,10 +65,10 @@ func (m *Manager) handleDanmaku(c *Client, data []byte) {
 		return
 	}
 	{
-		ctx, cancel := context.WithTimeout(context.Background(), infra.RedisCancelTimeout)
+		ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
 		defer cancel()
 		wire, _ := json.Marshal(packet)
-		status, eventID, err := infra.AcceptDanmaku(ctx, m.publisher, msg, wire)
+		status, eventID, err := m.store.AcceptDanmaku(ctx, msg, wire)
 		if err != nil {
 			m.liveFailures.Add(1)
 		}
@@ -85,7 +85,7 @@ func (m *Manager) handleDanmaku(c *Client, data []byte) {
 	}
 }
 
-func (m *Manager) handleLike(c *Client, data []byte) {
+func (m *Hub) handleLike(c *Client, data []byte) {
 	var like protocol.Like
 	if json.Unmarshal(data, &like) != nil || like.Count == 0 || like.Count > 20 {
 		m.reply(c, "", "invalid")

@@ -1,4 +1,4 @@
-package ws
+package hub
 
 import (
 	"hash/maphash"
@@ -8,7 +8,7 @@ import (
 func TestQueuedBroadcastKeepsOriginalMembers(t *testing.T) {
 	first := &Client{RoomID: "room"}
 	next := &Client{RoomID: "room"}
-	m := Manager{
+	m := Hub{
 		Rooms:          map[string]map[*Client]struct{}{"room": {first: {}}},
 		snapshots:      make(map[string][]*Client),
 		shardSeed:      maphash.MakeSeed(),

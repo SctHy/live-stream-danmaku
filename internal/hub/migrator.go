@@ -1,4 +1,4 @@
-package ws
+package hub
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 // Migrate marks the gateway unready before snapshotting membership. A notified
 // browser releases its old socket after syncing on the replacement gateway.
-func (m *Manager) Migrate(ctx context.Context, batch, limit int, interval time.Duration) {
+func (m *Hub) Migrate(ctx context.Context, batch, limit int, interval time.Duration) {
 	m.mu.Lock()
 	if m.retiring.Swap(true) {
 		m.mu.Unlock()
@@ -60,4 +60,4 @@ func migrationNotice() *outboundFrame {
 	return &outboundFrame{payload: wire, count: 1}
 }
 
-func (m *Manager) Retiring() bool { return m.retiring.Load() }
+func (m *Hub) Retiring() bool { return m.retiring.Load() }
