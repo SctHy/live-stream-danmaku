@@ -2,11 +2,13 @@ package hub
 
 import (
 	"encoding/json"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/scthy/live-stream-danmaku/internal/metrics"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
@@ -18,7 +20,8 @@ const (
 )
 
 type Client struct {
-	migration        chan *outboundFrame
+	metrics          *metrics.GatewayMetrics
+	migration        chan struct{}
 	registered       chan struct{}
 	subscription     <-chan struct{}
 	consecutiveDrops atomic.Uint32
@@ -39,10 +42,10 @@ type Client struct {
 
 func (m *Hub) NewClient(uid uint64, room string, conn *websocket.Conn) *Client {
 	return &Client{
-		registered: make(chan struct{}),
-		stats:      make(chan *outboundFrame, 1),
-		batch:      conn != nil && conn.Subprotocol() == protocol.BatchProtocol,
-		UserID:     uid,
+		metrics: m.metrics, registered: make(chan struct{}),
+		stats:  make(chan *outboundFrame, 1),
+		batch:  conn != nil && conn.Subprotocol() == protocol.BatchProtocol,
+		UserID: uid,
 
 		RoomID: room,
 		Socket: conn,
@@ -52,7 +55,7 @@ func (m *Hub) NewClient(uid uint64, room string, conn *websocket.Conn) *Client {
 }
 
 // EnableMigration is negotiated before the client joins the room.
-func (c *Client) EnableMigration() { c.migration = make(chan *outboundFrame, 1) }
+func (c *Client) EnableMigration() { c.migration = make(chan struct{}, 1) }
 
 func (c *Client) ReadPump(manager *Hub) {
 	defer func() {
@@ -82,6 +85,7 @@ func (c *Client) ReadPump(manager *Hub) {
 
 		var packet protocol.WsPacket
 		if err := json.Unmarshal(messageBytes, &packet); err != nil {
+			manager.metrics.Reject("invalid")
 			manager.log.Error("Invalid WebSocket JSON", "uid", c.UserID)
 			continue
 		}
@@ -110,7 +114,19 @@ func (c *Client) WritePump() {
 			continue
 		case message = <-c.Send:
 			chat = true
-		case message = <-c.migration:
+		case <-c.migration:
+			c.Socket.SetWriteDeadline(time.Now().Add(WriteWait))
+			w, err := c.Socket.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			if _, err = io.WriteString(w, migrationNotice); err != nil {
+				return
+			}
+			if err = w.Close(); err != nil {
+				return
+			}
+			continue
 		case message = <-c.stats:
 		}
 		c.Socket.SetWriteDeadline(time.Now().Add(WriteWait))
@@ -120,6 +136,9 @@ func (c *Client) WritePump() {
 		}
 		if err != nil {
 			return
+		}
+		if message.fanout {
+			c.metrics.Fanout(message.count)
 		}
 	}
 }
@@ -143,8 +162,13 @@ func (c *Client) setStats(frame *outboundFrame) {
 
 // Close gracefully closes the client connection and signals goroutines to exit.
 // It is idempotent thanks to sync.Once.
-func (c *Client) Close() {
+func (c *Client) Close()     { c.close(false) }
+func (c *Client) closeSlow() { c.close(true) }
+func (c *Client) close(slow bool) {
 	c.once.Do(func() {
+		if slow {
+			c.metrics.Kick()
+		}
 
 		close(c.done)
 

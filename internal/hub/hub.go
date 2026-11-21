@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/scthy/live-stream-danmaku/internal/filter"
+	"github.com/scthy/live-stream-danmaku/internal/metrics"
 	"github.com/scthy/live-stream-danmaku/internal/mq"
 	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 )
@@ -44,10 +46,12 @@ type Hub struct {
 	BatchWindow     time.Duration
 	MinBatchViewers int
 	BatchArrivalGap time.Duration
-	Metrics
-	statsRunning atomic.Bool
-	ready        map[string]<-chan struct{}
-	store        *pubsub.Store
+	metrics         *metrics.GatewayMetrics
+	filter          *filter.Filter
+	maskWords       bool
+	statsRunning    atomic.Bool
+	ready           map[string]<-chan struct{}
+	store           *pubsub.Store
 
 	Rooms map[string]map[*Client]struct{}
 
@@ -70,13 +74,19 @@ const (
 	RoomShards           = 32
 )
 
-func New(log *slog.Logger, producer *mq.Producer, store *pubsub.Store, sendCapacity, shards, muxShards int) *Hub {
+func New(log *slog.Logger, producer *mq.Producer, store *pubsub.Store, metrics *metrics.GatewayMetrics, words *filter.Filter, maskWords bool, sendCapacity, shards, muxShards int) *Hub {
 
 	serverID := rand.Text()
 
 	life, cancel := context.WithCancel(context.Background())
 	m := &Hub{
-		log: log, producer: producer, life: life, stop: cancel,
+		log:            log,
+		producer:       producer,
+		metrics:        metrics,
+		filter:         words,
+		maskWords:      maskWords,
+		life:           life,
+		stop:           cancel,
 		ServerID:       serverID,
 		started:        make(chan struct{}),
 		Register:       make(chan *Client),
@@ -117,10 +127,6 @@ func (m *Hub) Start() {
 		case client := <-m.Unregister:
 			m.handleUnregister(client)
 		case <-statsTicker.C:
-
-			if n := m.dropped.Swap(0); n > 0 {
-				m.log.Warn("Live delivery dropped", "recipient_messages", n)
-			}
 			if m.statsRunning.CompareAndSwap(false, true) {
 				go func() { defer m.statsRunning.Store(false); m.broadcastStats() }()
 			}

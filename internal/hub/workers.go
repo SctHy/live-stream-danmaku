@@ -28,8 +28,7 @@ func (m *Hub) broadcastWorker(queue <-chan *BroadcastJob) {
 			if !ok {
 				return
 			}
-			m.waitNanos.Add(uint64(time.Since(job.queued)))
-			m.measuredJobs.Add(1)
+			m.metrics.QueueWait(time.Since(job.queued))
 			m.deliver(job)
 		}
 	}
@@ -49,7 +48,6 @@ func (m *Hub) queueJob(roomID string, job *BroadcastJob) {
 	select {
 	case m.deliveryQueues[m.roomShard(roomID)] <- job:
 	default:
-		m.shardDrops.Add(uint64(len(job.Packets)) * uint64(len(job.Clients)))
-		m.dropped.Add(uint64(len(job.Packets)) * uint64(len(job.Clients)))
+		m.metrics.ShardDrop(len(job.Packets) * len(job.Clients))
 	}
 }

@@ -14,6 +14,9 @@ func (m *Hub) reply(c *Client, id, status string) {
 	m.receipt(c, id, status, "")
 }
 func (m *Hub) receipt(c *Client, id, status, eventID string) {
+	if status != "accepted" {
+		m.metrics.Reject(status)
+	}
 	data, _ := json.Marshal(protocol.Receipt{ClientMsgID: id, Status: status, EventID: eventID})
 	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeReceipt, Data: data})
 	m.safeSend(c, m.frame(wire, 1))
@@ -40,6 +43,7 @@ func (m *Hub) dispatch(c *Client, packet protocol.WsPacket) {
 	case protocol.TypeLike:
 		m.handleLike(c, packet.Data)
 	default:
+		m.metrics.Reject("invalid")
 		m.log.Warn("Unknown WebSocket message type", "type", packet.Type)
 	}
 }
@@ -51,6 +55,14 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		(input.VideoOffsetMS != nil && (*input.VideoOffsetMS < 0 || *input.VideoOffsetMS >= 86400000)) {
 		m.reply(c, input.ClientMsgID, "invalid")
 		return
+	}
+	if m.filter != nil {
+		if m.maskWords {
+			input.Content, _ = m.filter.Mask(input.Content, '*')
+		} else if m.filter.Contains(input.Content) {
+			m.reply(c, input.ClientMsgID, "filtered")
+			return
+		}
 	}
 	msg := protocol.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), VideoOffsetMS: input.VideoOffsetMS, ClientMsgID: input.ClientMsgID}
 	body, _ := json.Marshal(msg)
@@ -67,7 +79,7 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 	wire, _ := json.Marshal(packet)
 	status, eventID, err := m.store.AcceptDanmaku(ctx, msg, wire)
 	if err != nil {
-		m.liveFailures.Add(1)
+		m.log.Warn("Redis publication failed", "error", err)
 	}
 	if status == "new" {
 		m.producer.Publish(c.RoomID, wire)

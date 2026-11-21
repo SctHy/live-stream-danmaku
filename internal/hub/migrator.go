@@ -2,11 +2,10 @@ package hub
 
 import (
 	"context"
-	"encoding/json"
 	"time"
-
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
+
+const migrationNotice = `{"type":107,"data":{}}`
 
 // Migrate marks the gateway unready before snapshotting membership. A notified
 // browser releases its old socket after syncing on the replacement gateway.
@@ -28,8 +27,7 @@ func (m *Hub) Migrate(ctx context.Context, batch, limit int, interval time.Durat
 	if len(waiting) == 0 {
 		return
 	}
-	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeMigrate, Data: json.RawMessage(`{}`)})
-	notice := &outboundFrame{payload: wire, count: 1}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -54,7 +52,7 @@ func (m *Hub) Migrate(ctx context.Context, batch, limit int, interval time.Durat
 			count = min(count, limit-len(active))
 		}
 		for _, c := range waiting[:count] {
-			c.migration <- notice
+			c.migration <- struct{}{}
 			active = append(active, c)
 		}
 		waiting = waiting[count:]

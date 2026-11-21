@@ -18,6 +18,7 @@ const (
 type outboundFrame struct {
 	payload []byte
 	count   int
+	fanout  bool
 }
 
 func (m *Hub) frame(payload []byte, count int) *outboundFrame {
@@ -31,7 +32,7 @@ func (m *Hub) deliver(job *BroadcastJob) {
 		if c.batch && len(job.Packets) > 1 {
 			if batch == nil {
 				payload := append([]byte{'['}, bytes.Join(job.Packets, []byte{','})...)
-				batch = m.frame(append(payload, ']'), len(job.Packets))
+				batch = &outboundFrame{payload: append(payload, ']'), count: len(job.Packets), fanout: true}
 			}
 			m.safeSend(c, batch)
 			continue
@@ -39,7 +40,7 @@ func (m *Hub) deliver(job *BroadcastJob) {
 		if singles == nil {
 			singles = make([]*outboundFrame, len(job.Packets))
 			for i, p := range job.Packets {
-				singles[i] = m.frame(p, 1)
+				singles[i] = &outboundFrame{payload: p, count: 1, fanout: true}
 			}
 		}
 		for _, f := range singles {
@@ -59,10 +60,9 @@ func (m *Hub) safeSend(c *Client, f *outboundFrame) {
 		}
 	}
 	c.pendingBytes.Add(-size)
-	m.dropped.Add(uint64(f.count))
-	m.clientDrops.Add(uint64(f.count))
+	m.metrics.ClientDrop(f.count)
 	if c.consecutiveDrops.Add(1) == 8 && c.done != nil {
-		c.Close()
+		c.closeSlow()
 	}
 }
 

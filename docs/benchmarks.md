@@ -29,3 +29,18 @@ go run ./cmd/bench rooms
 go build -o /tmp/danmaku-gateway ./cmd/gateway
 go run ./cmd/bench migration -gateway /tmp/danmaku-gateway -viewers 24 -batch 4 -inflight 2
 ```
+
+## 敏感词过滤
+
+Apple M4，macOS arm64，Go 1.27.4。词库含 5,000 个不同的五字中文词条。每条输入均为 100 个汉字，命中组的敏感词位于末尾。计时仅包含匹配或打码，词库在计时前构建。
+
+| 操作 | 单次耗时 | 分配字节/次 | 分配次数/次 |
+|---|---:|---:|---:|
+| Contains，未命中 | 1.339 µs | 0 | 0 |
+| Contains，命中 | 1.344 µs | 0 | 0 |
+| Mask，未命中 | 1.288 µs | 0 | 0 |
+| Mask，命中 | 3.553 µs | 2,528 | 4 |
+
+```sh
+go test -bench=. -benchmem ./internal/filter
+```

@@ -100,16 +100,17 @@ func (s *shard) receive() {
 			if v.Kind != "subscribe" {
 				continue
 			}
+			var ackChannel string
 			s.mu.Lock()
-			sub := s.pending[v.Channel]
-			if sub != nil {
+			if sub := s.pending[v.Channel]; sub != nil {
+				ackChannel = v.Channel
 				close(sub.ready)
 				sub.ready = nil
 				delete(s.pending, v.Channel)
 			}
 			s.mu.Unlock()
-			if sub != nil {
-				s.conn.Unsubscribe(context.Background(), v.Channel)
+			if ackChannel != "" {
+				s.conn.Unsubscribe(context.Background(), ackChannel)
 			}
 		case *redis.Message:
 			s.mu.RLock()

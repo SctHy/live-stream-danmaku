@@ -67,7 +67,7 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 			r := NewMessageRepo(pool)
 			batch := []*protocol.DanmakuMessage{{EventID: "same", RoomID: "x", Content: "now", UserID: ^uint64(0), SendTime: time.Now()}}
 			for range 2 {
-				if err := r.SaveBatch(ctx, batch); err != nil {
+				if _, err := r.SaveBatch(ctx, batch); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -87,7 +87,7 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 					}
 				}
 				msg := &protocol.DanmakuMessage{RoomID: "x", EventID: id, SendTime: time.Now(), VideoOffsetMS: &offset}
-				if err := r.SaveBatch(ctx, []*protocol.DanmakuMessage{msg}); err != nil {
+				if _, err := r.SaveBatch(ctx, []*protocol.DanmakuMessage{msg}); err != nil {
 					t.Fatal(err)
 				}
 			}

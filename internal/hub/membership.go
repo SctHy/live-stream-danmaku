@@ -30,11 +30,13 @@ func (m *Hub) handleRegister(client *Client) {
 			return
 		}
 		m.ready[client.RoomID] = ready
+		m.metrics.Membership(0, 1)
 
 		m.log.Info("Room subscription started", "room", client.RoomID)
 	}
 
 	m.Rooms[client.RoomID][client] = struct{}{}
+	m.metrics.Membership(1, 0)
 	delete(m.snapshots, client.RoomID)
 	client.subscription = m.ready[client.RoomID]
 	if client.registered != nil {
@@ -50,10 +52,12 @@ func (m *Hub) handleUnregister(client *Client) {
 	if clients, ok := m.Rooms[client.RoomID]; ok {
 		if _, ok := clients[client]; ok {
 			delete(clients, client)
+			m.metrics.Membership(-1, 0)
 			delete(m.snapshots, client.RoomID)
 
 			client.Close()
 			if len(clients) == 0 {
+				m.metrics.Membership(0, -1)
 				delete(m.Rooms, client.RoomID)
 				delete(m.ready, client.RoomID)
 				if cancel, exists := m.cancelSub[client.RoomID]; exists {

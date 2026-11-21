@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"log/slog"
@@ -13,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/scthy/live-stream-danmaku/internal/filter"
 	"github.com/scthy/live-stream-danmaku/internal/httpapi"
 	"github.com/scthy/live-stream-danmaku/internal/hub"
+	"github.com/scthy/live-stream-danmaku/internal/metrics"
 	"github.com/scthy/live-stream-danmaku/internal/mq"
 	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 	"github.com/scthy/live-stream-danmaku/internal/store"
@@ -34,6 +35,8 @@ func main() {
 	migrationLimit := flag.Int("migration-inflight", 64, "maximum outstanding handoffs (zero uses fixed rate)")
 	allowDev := flag.Bool("allow-dev-guest", false, "allow loopback benchmark identities")
 	muxShards := flag.Int("pubsub-shards", 8, "Redis subscription connections")
+	wordFile := flag.String("sensitive-words", "", "dictionary file, one word per line")
+	mode := flag.String("filter-mode", "reject", "reject or mask matching messages")
 	flag.Parse()
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	switch *format {
@@ -48,6 +51,20 @@ func main() {
 		log.Error("invalid gateway configuration")
 		os.Exit(2)
 	}
+	if *mode != "reject" && *mode != "mask" {
+		log.Error("invalid filter mode", "mode", *mode)
+		os.Exit(2)
+	}
+	var words *filter.Filter
+	if *wordFile != "" {
+		var err error
+		words, err = filter.LoadFile(*wordFile)
+		if err != nil {
+			log.Error("Load sensitive words", "error", err)
+			os.Exit(1)
+		}
+	}
+	telemetry := metrics.NewGatewayMetrics()
 	db, err := store.Open()
 	if err != nil {
 		log.Error("PostgreSQL startup", "error", err)
@@ -56,12 +73,12 @@ func main() {
 	defer db.Close()
 	sessions := pubsub.Open(os.Getenv("REDIS_ADDR"))
 	defer sessions.Close()
-	producer, err := mq.NewProducer(mq.Brokers(os.Getenv("KAFKA_BROKERS")), log)
+	producer, err := mq.NewProducer(mq.Brokers(os.Getenv("KAFKA_BROKERS")), log, telemetry)
 	if err != nil {
 		log.Error("Kafka startup", "error", err)
 		os.Exit(1)
 	}
-	m := hub.New(log, producer, sessions, *capacity, *shards, *muxShards)
+	m := hub.New(log, producer, sessions, telemetry, words, *mode == "mask", *capacity, *shards, *muxShards)
 	m.BatchWindow = *window
 	m.BatchArrivalGap = *gap
 	m.MinBatchViewers = *minViewers
@@ -86,13 +103,27 @@ func main() {
 		}
 		w.WriteHeader(200)
 	})
-	r.HandleFunc("GET /metrics", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(m.Counters())
-	})
+	r.Handle("GET /metrics", telemetry.Handler())
 	srv := http.Server{Addr: net.JoinHostPort(*host, *port), Handler: httpapi.Recover(log, r), ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if words != nil {
+		reload := make(chan os.Signal, 1)
+		signal.Notify(reload, syscall.SIGHUP)
+		defer signal.Stop(reload)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-reload:
+					if err := words.ReloadFile(*wordFile); err != nil {
+						log.Error("Reload sensitive words", "error", err)
+					}
+				}
+			}
+		}()
+	}
 	done := make(chan error, 1)
 	go func() { done <- srv.ListenAndServe() }()
 	select {

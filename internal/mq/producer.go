@@ -4,21 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/scthy/live-stream-danmaku/internal/metrics"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 const topic = "danmaku_save_topic"
 
 type Producer struct {
-	client   *kgo.Client
-	log      *slog.Logger
-	Failures atomic.Uint64
+	client  *kgo.Client
+	log     *slog.Logger
+	metrics *metrics.GatewayMetrics
 }
 
-func NewProducer(brokers []string, log *slog.Logger) (*Producer, error) {
+func NewProducer(brokers []string, log *slog.Logger, metrics *metrics.GatewayMetrics) (*Producer, error) {
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.AllowAutoTopicCreation(),
@@ -32,12 +32,12 @@ func NewProducer(brokers []string, log *slog.Logger) (*Producer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Producer{client: cl, log: log}, nil
+	return &Producer{client: cl, log: log, metrics: metrics}, nil
 }
 func (p *Producer) Publish(room string, data []byte) {
 	p.client.TryProduce(context.Background(), &kgo.Record{Topic: topic, Key: []byte(room), Value: data}, func(_ *kgo.Record, err error) {
 		if err != nil {
-			p.Failures.Add(1)
+			p.metrics.KafkaFailure()
 			p.log.Error("History publish failed", "error", err)
 		}
 	})

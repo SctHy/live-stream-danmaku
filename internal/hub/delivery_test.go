@@ -3,12 +3,16 @@ package hub
 import (
 	"context"
 	"hash/maphash"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/scthy/live-stream-danmaku/internal/metrics"
 )
 
 func TestMixedFanoutAndBudget(t *testing.T) {
-	m := Hub{}
+	m := Hub{metrics: metrics.NewGatewayMetrics()}
 	legacy := &Client{Send: make(chan *outboundFrame, 3)}
 	a := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
 	b := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
@@ -25,7 +29,7 @@ func TestMixedFanoutAndBudget(t *testing.T) {
 	}
 	a.pendingBytes.Store(maxQueuedBytes - 1)
 	m.safeSend(a, frame)
-	if m.dropped.Load() != 2 || len(a.Send) != 0 || a.pendingBytes.Load() != maxQueuedBytes-1 {
+	if !strings.Contains(scrape(m.metrics), `danmaku_dropped_messages_total{reason="client_full"} 2`) || len(a.Send) != 0 || a.pendingBytes.Load() != maxQueuedBytes-1 {
 		t.Fatal("byte limit or drop count")
 	}
 }
@@ -108,7 +112,7 @@ func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
 }
 
 func TestStalledViewerAndLatestStats(t *testing.T) {
-	m := Hub{sendCapacity: 1}
+	m := Hub{sendCapacity: 1, metrics: metrics.NewGatewayMetrics()}
 	stalled := m.NewClient(1, "room", nil)
 	frame := m.frame([]byte("hello"), 1)
 	m.safeSend(stalled, frame)
@@ -120,8 +124,11 @@ func TestStalledViewerAndLatestStats(t *testing.T) {
 	default:
 		t.Fatal("stalled viewer still connected")
 	}
-	if m.clientDrops.Load() != 8 || m.shardDrops.Load() != 0 {
-		t.Fatal(m.Counters())
+	out := scrape(m.metrics)
+	for _, sample := range []string{`danmaku_dropped_messages_total{reason="client_full"} 8`, `danmaku_dropped_messages_total{reason="shard_full"} 0`, "danmaku_kicked_slow_clients_total 1"} {
+		if !strings.Contains(out, sample) {
+			t.Fatal(sample)
+		}
 	}
 	healthy := m.NewClient(2, "room", nil)
 	healthy.setStats(frame)
@@ -131,4 +138,10 @@ func TestStalledViewerAndLatestStats(t *testing.T) {
 	if <-healthy.stats != latest || <-healthy.Send != frame {
 		t.Fatal("stats displaced chat")
 	}
+}
+
+func scrape(m *metrics.GatewayMetrics) string {
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	return w.Body.String()
 }

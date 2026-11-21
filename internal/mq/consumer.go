@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/scthy/live-stream-danmaku/internal/metrics"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 type batchStore interface {
-	SaveBatch(context.Context, []*protocol.DanmakuMessage) error
+	SaveBatch(context.Context, []*protocol.DanmakuMessage) (int64, error)
 }
 
-func Consume(ctx context.Context, brokers []string, store batchStore, log *slog.Logger) error {
+func Consume(ctx context.Context, brokers []string, store batchStore, log *slog.Logger, metrics *metrics.ArchiveMetrics) error {
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.ConsumeTopics(topic),
@@ -39,7 +40,7 @@ func Consume(ctx context.Context, brokers []string, store batchStore, log *slog.
 		}
 		fetch.EachPartition(func(p kgo.FetchTopicPartition) {
 			if err == nil && len(p.Records) > 0 {
-				err = archivePartition(ctx, store, log, p.Records, cl.CommitRecords)
+				err = archivePartition(ctx, store, log, metrics, p.Records, cl.CommitRecords)
 			}
 		})
 		cl.AllowRebalance()
@@ -49,12 +50,13 @@ func Consume(ctx context.Context, brokers []string, store batchStore, log *slog.
 	}
 	return ctx.Err()
 }
-func archivePartition(ctx context.Context, store batchStore, log *slog.Logger, records []*kgo.Record, commit func(context.Context, ...*kgo.Record) error) error {
+func archivePartition(ctx context.Context, store batchStore, log *slog.Logger, metrics *metrics.ArchiveMetrics, records []*kgo.Record, commit func(context.Context, ...*kgo.Record) error) error {
 	batch := make([]*protocol.DanmakuMessage, 0, len(records))
 	for _, r := range records {
 		var p protocol.WsPacket
 		var d protocol.DanmakuMessage
 		if json.Unmarshal(r.Value, &p) != nil || p.Type != protocol.TypeDanmaku || json.Unmarshal(p.Data, &d) != nil || !d.FitsHistory() {
+			metrics.DeadLetter()
 			log.Error("Invalid history record", "topic", r.Topic, "partition", r.Partition, "offset", r.Offset)
 			continue
 		}
@@ -63,7 +65,7 @@ func archivePartition(ctx context.Context, store batchStore, log *slog.Logger, r
 		}
 		batch = append(batch, &d)
 	}
-	if err := persist(ctx, store, batch, log); err != nil {
+	if err := persist(ctx, store, batch, log, metrics); err != nil {
 		return err
 	}
 	return commit(ctx, records[len(records)-1])

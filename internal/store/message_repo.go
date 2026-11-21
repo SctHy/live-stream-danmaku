@@ -21,9 +21,9 @@ func NewMessageRepo(db *pgxpool.Pool) *MessageRepo {
 
 // SaveBatch inserts one partition batch atomically. The PostgreSQL driver encodes
 // arrays as six bind parameters regardless of batch size.
-func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMessage) error {
+func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMessage) (int64, error) {
 	if len(msgs) == 0 {
-		return nil
+		return 0, nil
 	}
 	ids := make([]string, len(msgs))
 	rooms := make([]string, len(msgs))
@@ -40,12 +40,12 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 		contents[i] = msg.Content
 		times[i] = msg.SendTime
 	}
-	_, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time, video_offset_ms)
+	tag, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time, video_offset_ms)
  SELECT id, room, uid::numeric, body, sent, media_time
  FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[], $6::bigint[])
  AS batch(id, room, uid, body, sent, media_time)
  ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times, offsets)
-	return err
+	return tag.RowsAffected(), err
 }
 
 // Playback pages through a half-open media interval. The row id breaks ties at the same millisecond.

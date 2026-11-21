@@ -243,6 +243,7 @@ async function connect() {
               invalid: '内容无效',
               muted: '当前已禁言',
               rate_limited: '发送过快',
+              filtered: '内容包含敏感词',
               overloaded: '网关繁忙，请稍后重试',
             }[p.data.status] || '服务暂不可用',
           )
