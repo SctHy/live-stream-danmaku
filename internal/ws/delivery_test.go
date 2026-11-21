@@ -34,7 +34,7 @@ func TestMixedFanoutAndBudget(t *testing.T) {
 
 func TestRoomBatchDrainsInOrder(t *testing.T) {
 	c := &Client{batch: true}
-	m := Manager{Rooms: map[string]map[*Client]struct{}{"r": {c: {}}}, snapshots: make(map[string][]*Client), BatchWindow: time.Hour, shardSeed: maphash.MakeSeed(), deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 100)}}
+	m := Manager{Rooms: map[string]map[*Client]struct{}{"r": {c: {}}}, snapshots: make(map[string][]*Client), BatchWindow: time.Hour, BatchArrivalGap: time.Second, shardSeed: maphash.MakeSeed(), deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 100)}}
 	in := make(chan *redis.Message, 80)
 	for i := range 80 {
 		in <- &redis.Message{Payload: string(rune('A' + i))}
@@ -56,6 +56,44 @@ func TestRoomBatchDrainsInOrder(t *testing.T) {
 	}
 	if total != 80 {
 		t.Fatal(total)
+	}
+}
+
+func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		gap               time.Duration
+		minimum, wantJobs int
+	}{
+		{"disabled", 0, 1, 3},
+		{"eligible", time.Hour, 1, 2},
+		{"below-local-minimum", time.Hour, 2, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Client{batch: true}
+			jobs := make(chan *BroadcastJob, 3)
+			m := Manager{
+				Rooms:           map[string]map[*Client]struct{}{"r": {c: {}}},
+				snapshots:       make(map[string][]*Client),
+				deliveryQueues:  []chan *BroadcastJob{jobs},
+				shardSeed:       maphash.MakeSeed(),
+				BatchWindow:     time.Hour,
+				BatchArrivalGap: tc.gap,
+				MinBatchViewers: tc.minimum,
+			}
+			messages := make(chan *redis.Message, 3)
+			for _, p := range []string{"a", "b", "c"} {
+				messages <- &redis.Message{Payload: p}
+			}
+			close(messages)
+			m.consumeRoom(context.Background(), "r", messages)
+			if len(jobs) != tc.wantJobs {
+				t.Fatalf("got %d jobs, want %d", len(jobs), tc.wantJobs)
+			}
+			if first := <-jobs; len(first.Packets) != 1 || string(first.Packets[0]) != "a" {
+				t.Fatal("first event was not dispatched immediately")
+			}
+		})
 	}
 }
 

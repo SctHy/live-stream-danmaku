@@ -88,7 +88,7 @@ func (c *Client) ReadPump(manager *Manager) {
 
 		// 3. Dispatch to Handler
 		// We pass 'manager' because handlers need to Broadcast or AddLike.
-		Dispatch(c, manager, packet.Type, packet.Data)
+		manager.dispatch(c, packet)
 	}
 }
 

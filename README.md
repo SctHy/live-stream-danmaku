@@ -1,6 +1,8 @@
 # 🎬 Live-Stream-Danmaku — 高性能直播弹幕后端系统
 
-> Bilibili / YouTube 级直播弹幕系统，Go 语言从零搭建，单机支撑 **6万+ 长连接**、**150万 QPS 下行广播**。
+> Go 直播弹幕网关，支持跨网关房间广播、断线补发、撤回与时间轴回放。
+>
+> 本机双网关实测：同一房间 **10,000 个 WebSocket 观众、50 条弹幕/秒、持续 15 分钟**，逐观众核验 **4.5 亿次投递**，缺失与重复均为零。使用 180 ms 合批窗口，两个热房探针收包 P99 分别为 286 / 293 ms。[实验条件、失败档与复现方法](docs/hot-room-capacity.md)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.27.4-00ADD8?style=flat&logo=go" alt="Go">
@@ -11,6 +13,8 @@
 </p>
 
 ---
+
+[优化迭代记录](docs/optimization-log.md)汇总每次调整的原因、做法和验证结果。
 
 ## 在 Mac 上打开弹幕放映室
 
@@ -51,44 +55,10 @@
 
 ## 🏗️ 系统架构
 
-```
-┌─────────────┐     WebSocket      ┌──────────────────────────────────────────┐
-│   Client     │ ◄──────────────► │         Go Server (Gin + Gorilla WS)      │
-│  (浏览器/APP) │                   │                                          │
-└─────────────┘                   │  ┌─────────┐  ┌──────────┐  ┌─────────┐ │
-                                  │  │ Handler  │─►│ Service  │─►│  Repo   │ │
-                                  │  └────┬────┘  └──────────┘  └────┬────┘ │
-                                  │       │                          │       │
-                                  │       ▼                          ▼       │
-                                  │  ┌─────────────────────────────────┐    │
-                                  │  │        WebSocket Manager         │    │
-                                  │  │  ┌───────────────────────────┐  │    │
-                                  │  │  │  Register / Unregister    │  │    │
-                                  │  │  │  Per-shard publish queue  │  │    │
-                                  │  │  │  Rooms Map (RoomID→Clients)│ │    │
-                                  │  │  │  Room-sharded workers     │  │    │
-                                  │  │  │  Cached room snapshots    │  │    │
-                                  │  │  └───────────────────────────┘  │    │
-                                  │  └──────────┬──────────┬────────────┘    │
-                                  └─────────────┼──────────┼─────────────────┘
-                                                │          │
-                              ┌─────────────────▼──┐  ┌────▼──────────────┐
-                              │   Redis (Pub/Sub)   │  │  Kafka (Async)    │
-                              │   ┌──────────────┐  │  │  ┌─────────────┐ │
-                              │   │ room:{id}:   │  │  │  │ danmaku_    │ │
-                              │   │   pubsub     │  │  │  │ save_topic  │ │
-                              │   ├──────────────┤  │  │  └──────┬──────┘ │
-                              │   │ room:{id}:   │  │  └─────────┼────────┘
-                              │   │   likes      │  │            │
-                              │   ├──────────────┤  │   ┌────────▼────────┐
-                              │   │ room:{id}:   │  │   │ Kafka Consumer  │
-                              │   │   online:{s} │  │   │ Group (Batch)   │
-                              │   └──────────────┘  │   └────────┬────────┘
-                              └────────────────────┘            │
-                                                          ┌─────▼─────┐
-                                                          │  PG 17     │
-                                                          │  (pgxpool) │
-                                                          └───────────┘
+```text
+浏览器 / CLI ──WebSocket──► Go 网关 ──Redis 房间频道──► 各网关 ──► 房内观众
+                              └──待归档队列──► Kafka ──► 消费者 ──► PostgreSQL
+浏览器 ──HTTP──► 近期补发读取 Redis；回放与撤回使用历史仓储
 ```
 
 ---
@@ -98,8 +68,7 @@
 ### 1. 🚀 Server 层
 
 - **Go + Gin + Gorilla WebSocket**：协程处理长 WebSocket 连接，内存占用极低，天然适合直播间用户连接
-- **分层架构**：Controller → Service → Repo，依赖注入，职责清晰
-- **策略模式**：`Dispatcher` + `ActionRegistry` 路由不同消息类型（弹幕 / 点赞 / 统计）
+- HTTP 层通过历史仓储接口处理回放与撤回，WebSocket 网关负责弹幕和点赞，Kafka 消费者独立写入历史。
 
 ### 2. 📡 分布式消息 — Redis
 
@@ -120,7 +89,7 @@ Kafka 地址可通过 `KAFKA_BROKERS` 配置，多个地址用逗号分隔。浏
 
 ### 4. 🛡️ 广播优化
 
-客户端可协商 WebSocket 子协议 `danmaku.batch.v1`，收包时兼容单个对象和对象数组；仓库自带命令行客户端已支持。旧协议逐条投递。房间达到 128 位已协商观众（可调 `-batch-min-viewers`）后，间隔不超过 2 ms 的连续到达触发合批，默认最多等待 5 ms、32 条或 32 KiB，先到即发。稀疏消息直接发送。服务端参数 `-batch-window 0` 关闭合批，`-prepared=true` 开启跨连接共享预制帧。实测与故障语义见[广播与存储验证](docs/fanout-benchmarks.md)。
+客户端可协商 WebSocket 子协议 `danmaku.batch.v1`，收包时兼容单个对象和对象数组；仓库自带命令行客户端已支持。旧协议逐条投递。房间达到 128 位已协商观众（可调 `-batch-min-viewers`）后，连续到达间隔低于配置门槛时触发合批（默认 2 ms，可用 `-batch-arrival-gap` 调整），默认最多等待 5 ms、32 条或 32 KiB，先到即发。稀疏消息直接发送。服务端参数 `-batch-window 0` 关闭合批，`-prepared=true` 开启跨连接共享预制帧。实测与故障语义见[广播与存储验证](docs/fanout-benchmarks.md)。
 
 
 - **Sharding Workers**：32 个房间哈希分片，各自串行处理发布和下行分发；同分片房间共享队列
@@ -139,13 +108,14 @@ Kafka 地址可通过 `KAFKA_BROKERS` 配置，多个地址用逗号分隔。浏
 │   ├── consumer/        # Kafka 消费者落盘服务入口
 │   ├── client/          # 交互式 CLI 客户端
 │   └── benchmark/       # 压测工具（WebSocket + Kafka Producer）
+│       ├── fanout/      # 热房投递正确性与延迟
+│       ├── rooms/       # 热房对冷房的影响
 │       └── kafka/       # Kafka 纯写入吞吐压测
 ├── internal/
 │   ├── api/             # Handler 层 (Gin Controller + WebSocket Upgrade)
-│   ├── service/         # Service 层 (业务逻辑)
 │   ├── repo/            # Repo 层 (pgxpool 与参数化 SQL)
 │   ├── model/           # 数据模型 (WsPacket / DanmakuMessage / StatsData / Like)
-│   ├── ws/              # WebSocket 核心 (Manager / Client / Dispatcher / Router)
+│   ├── ws/              # WebSocket 核心 (Manager / Client / Router)
 │   ├── consumer/        # Kafka 消费者 Handler (批量落盘 + 重试)
 │   ├── infra/           # 基础设施 (Redis / Kafka / PostgreSQL 初始化)
 │   └── logger/          # Zap 日志 (dev 彩色 / prod JSON)
@@ -225,8 +195,8 @@ go run cmd/client/main.go -uid 1001 -room 1001 -port 8080
 ### 5. 压测
 
 ```bash
-# WebSocket 压测（默认 30000 连接）
-go run cmd/benchmark/main.go -c 60000 -r 1s
+# 热房压测（逐观众校验，连接已启动的网关）
+go run ./cmd/benchmark/fanout -browser -viewers 1000 -rate 50 -seconds 10
 
 # Kafka 纯写入吞吐压测
 go run cmd/benchmark/kafka/kafka.go

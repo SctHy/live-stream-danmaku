@@ -27,6 +27,7 @@ func main() {
 	port := flag.String("port", "8080", "HTTP port")
 	capacity := flag.Int("send-queue", ws.SendChanSize, "maximum frames per connection")
 	window := flag.Duration("batch-window", 5*time.Millisecond, "maximum hot-room coalescing delay")
+	gap := flag.Duration("batch-arrival-gap", ws.DefaultBatchArrivalGap, "maximum interval between arrivals to start a batch")
 	minViewers := flag.Int("batch-min-viewers", 128, "minimum batch-capable viewers")
 	prepared := flag.Bool("prepared", false, "share prepared frames")
 	shards := flag.Int("room-shards", ws.RoomShards, "number of room workers")
@@ -34,14 +35,14 @@ func main() {
 	migrationBatch := flag.Int("migration-batch", 100, "maximum handoff invitations per 100ms")
 	migrationLimit := flag.Int("migration-inflight", 64, "maximum outstanding handoffs (zero uses fixed rate)")
 	flag.Parse()
-	if *migrationTimeout < 0 || *migrationBatch < 1 || *migrationLimit < 0 || *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 {
+	if *migrationTimeout < 0 || *migrationBatch < 1 || *migrationLimit < 0 || *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 || *gap < 0 {
 		logger.Log.Fatal("invalid gateway configuration")
 	}
 	db := infra.InitDB()
 	defer db.Close()
-	ws.RegisterActionHandlers()
 	m := ws.NewManager(*capacity, *shards)
 	m.BatchWindow = *window
+	m.BatchArrivalGap = *gap
 	m.MinBatchViewers = *minViewers
 	m.Prepared = *prepared
 	go m.Start()

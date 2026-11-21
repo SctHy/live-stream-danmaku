@@ -6,6 +6,12 @@ $('join').elements.room.value = room
 $('join').elements.session.value = session
 const base = '/api/rooms/' + [room, session].map(encodeURIComponent).join('/')
 const video = $('video')
+const demoSource = video.getAttribute('src')
+const listLimit = 100
+const overlayLimit = 20
+let sample = null
+let seekPending = false
+let importVersion = 0
 let socket,
   cursor = '',
   live = true,
@@ -55,20 +61,24 @@ function show(d, animate) {
   if (visible.has(d.event_id)) return
   const item = document.createElement('li'),
     user = document.createElement('small')
-  user.textContent = '观众 ' + d.user_id
+  user.textContent = sample
+    ? (d.video_offset_ms / 1000).toFixed(2) + ' 秒'
+    : '观众 ' + d.user_id
   item.append(user, document.createTextNode(d.content))
   $('messages').prepend(item)
-  const option = new Option(d.content.slice(0, 28), d.event_id)
-  option.dataset.uid = d.user_id
-  $('target').add(option, 1)
-  if ($('target').length > 101) $('target').remove(101)
+  if (!sample) {
+    const option = new Option(d.content.slice(0, 28), d.event_id)
+    option.dataset.uid = d.user_id
+    $('target').add(option, 1)
+    if ($('target').length > 101) $('target').remove(101)
+  }
   visible.set(d.event_id, item)
-  if (visible.size > 100) {
+  if (visible.size > listLimit) {
     const key = visible.keys().next().value
     visible.get(key).remove()
     visible.delete(key)
   }
-  if (!animate || $('overlay').childElementCount >= 20) return
+  if (!animate || $('overlay').childElementCount >= overlayLimit) return
   const span = document.createElement('span')
   span.textContent = d.content
   span.className = 'fly'
@@ -89,7 +99,7 @@ function withdraw(id) {
   if (!live) void loadReplay()
 }
 function apply(p, animate) {
-  if (p.type === 105) withdraw(p.data.event_id)
+  if (!sample && p.type === 105) withdraw(p.data.event_id)
   if (live && p.type === 101) {
     show(p.data, animate)
     if (pendingSend && p.data.user_id === userID && p.data.client_msg_id === pendingSend.data.client_msg_id) {
@@ -328,21 +338,120 @@ async function loadReplay(start = Math.floor(video.currentTime * 1000)) {
     if (generation === replayGeneration) feedback('回放加载失败，请重新定位')
   }
 }
+function firstEventAtOrAfter(events, ms, lo = 0) {
+  let hi = events.length
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (events[mid].video_offset_ms < ms) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
 function drawReplay() {
-  if (live) return
+  if (live || video.seeking || seekPending) return
   const now = Math.floor(video.currentTime * 1000)
+  if (sample) {
+    const start = sample.index
+    const end = firstEventAtOrAfter(sample.events, now + 1, start)
+    const tail = Math.max(start, end - listLimit)
+    // Earlier rows in this tick would be evicted before the next paint.
+    // Keep the first available overlay slots and the most recent sidebar rows.
+    const slots = Math.max(0, overlayLimit - $('overlay').childElementCount)
+    for (let i = start; i < Math.min(tail, start + slots); i++)
+      show(sample.events[i], true)
+    for (let i = tail; i < end; i++) show(sample.events[i], true)
+    sample.index = end
+    return
+  }
   while (replayEvents.length && replayEvents[0].video_offset_ms <= now)
     show(replayEvents.shift(), true)
   if (now >= loadedUntil) void loadReplay(loadedUntil)
 }
 video.ontimeupdate = drawReplay
+video.onseeking = () => {
+  seekPending = true
+}
+video.onloadstart = () => {
+  seekPending = false
+}
 video.onseeked = () => {
+  seekPending = false
   if (!live) {
     clear()
-    void loadReplay()
+    if (sample) {
+      sample.index = firstEventAtOrAfter(
+        sample.events,
+        Math.round(video.currentTime * 1000),
+      )
+      drawReplay()
+    } else void loadReplay()
+  }
+}
+
+$('sample-files').onchange = async (event) => {
+  const version = ++importVersion
+  const files = Array.from(event.target.files)
+  event.target.value = ''
+  const list = files.find((f) => /\.json$/i.test(f.name))
+  const media = files.find(
+    (f) => f.type.startsWith('video/') || /\.(mp4|m4v|webm|mov)$/i.test(f.name),
+  )
+  if (files.length !== 2 || !list || !media) {
+    $('sample-status').textContent = '请同时选择一个视频和一个 JSON 文件。'
+    return
+  }
+  try {
+    const rows = JSON.parse(await list.text())
+    if (version !== importVersion) return
+    if (!Array.isArray(rows) || !rows.length) throw Error()
+    const events = rows
+      .map((row, i) => {
+        if (
+          !Number.isSafeInteger(row.video_offset_ms) ||
+          row.video_offset_ms < 0 ||
+          typeof row.content !== 'string'
+        )
+          throw Error()
+        return {
+          video_offset_ms: row.video_offset_ms,
+          content: row.content,
+          event_id: 'local-' + i,
+        }
+      })
+      .sort((a, b) => a.video_offset_ms - b.video_offset_ms)
+    if (sample) URL.revokeObjectURL(sample.url)
+    sample = { events, index: 0, url: URL.createObjectURL(media) }
+    live = false
+    replayGeneration++
+    replayEvents = []
+    clear()
+    controls()
+    feedback('')
+    $('live').setAttribute('aria-pressed', 'false')
+    $('replay').setAttribute('aria-pressed', 'false')
+    $('heading').textContent = '本地回放'
+    $('moderation-panel').hidden = true
+    $('sample-status').textContent =
+      media.name + ' · ' + events.length + ' 条弹幕'
+    video.loop = false
+    video.src = sample.url
+    video.play().catch(() => {})
+  } catch {
+    if (version === importVersion)
+      $('sample-status').textContent =
+        '弹幕文件需要包含 video_offset_ms 和 content 的 JSON 数组。'
   }
 }
 function mode(isLive) {
+  importVersion++
+  if (sample) {
+    const previous = sample.url
+    sample = null
+    video.src = demoSource
+    URL.revokeObjectURL(previous)
+    $('sample-status').textContent = ''
+    $('moderation-panel').hidden = false
+  }
   live = isLive
   replayGeneration++
   clear()
@@ -366,7 +475,7 @@ $('live').onclick = () => {
   if (!live) mode(true)
 }
 $('replay').onclick = () => {
-  if (live) mode(false)
+  if (live || sample) mode(false)
 }
 video.loop = true
 video.play().catch(() => {})

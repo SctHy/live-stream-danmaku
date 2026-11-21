@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	maxBatchMessages = 32
-	maxBatchBytes    = 32 << 10
-	maxQueuedBytes   = 256 << 10
-	hotArrivalGap    = 2 * time.Millisecond
+	maxBatchMessages       = 32
+	maxBatchBytes          = 32 << 10
+	maxQueuedBytes         = 256 << 10
+	DefaultBatchArrivalGap = 2 * time.Millisecond
 )
 
 type outboundFrame struct {
@@ -125,7 +125,7 @@ func (m *Manager) consumeRoom(ctx context.Context, room string, ch <-chan *redis
 			if pending != nil && (!now.Before(expires) || &pending.Clients[0] != &members[0] || size+len(payload)+1 > maxBatchBytes) {
 				flush()
 			}
-			hot := now.Sub(previous) <= hotArrivalGap
+			hot := m.BatchArrivalGap > 0 && now.Sub(previous) <= m.BatchArrivalGap
 			previous = now
 			if pending == nil {
 				pending = &BroadcastJob{Clients: members}

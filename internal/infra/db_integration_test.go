@@ -72,23 +72,13 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 					t.Fatal(err)
 				}
 			}
-			rows, err := r.GetPlayBackDanmaku("x", time.Time{}, 100)
-			if err != nil {
-				t.Fatal(err)
-			}
-			expected := 1
-			if legacy {
-				expected = 2
-			}
-			if len(rows) != expected || rows[len(rows)-1].UserID != ^uint64(0) {
-				t.Fatalf("rows %v", rows)
-			}
-			if legacy && (rows[0].Content != "legacy" || rows[0].EventID != "") {
-				t.Fatalf("legacy record changed: %+v", rows[0])
-			}
-			rows, err = r.GetPlayBackDanmaku("x", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), 1)
-			if err != nil || len(rows) != 1 || rows[0].Content != "now" {
-				t.Fatalf("playback %v %v", rows, err)
+			var replayed, preserved int
+			err = pool.QueryRow(ctx, `SELECT
+             count(*) FILTER (WHERE event_id='same' AND user_id=18446744073709551615 AND content='now'),
+             count(*) FILTER (WHERE event_id IS NULL AND content='legacy' AND video_offset_ms IS NULL)
+             FROM danmaku_messages WHERE room_id='x'`).Scan(&replayed, &preserved)
+			if err != nil || replayed != 1 || (legacy && preserved != 1) || (!legacy && preserved != 0) {
+				t.Fatalf("migration and replay: replayed=%d preserved=%d err=%v", replayed, preserved, err)
 			}
 			offset := int64(1000)
 			for _, id := range []string{"visible", "hidden", "later"} {

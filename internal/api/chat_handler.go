@@ -19,7 +19,6 @@ import (
 
 	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
 	"github.com/charlesAcmen/livestream-danmaku/internal/model"
-	"github.com/charlesAcmen/livestream-danmaku/internal/repo"
 	"github.com/charlesAcmen/livestream-danmaku/internal/ws"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -31,12 +30,17 @@ var assets embed.FS
 var slug = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,24}$`)
 var upgrader = websocket.Upgrader{Subprotocols: []string{model.BatchProtocol}}
 
+type historyStore interface {
+	Playback(ctx context.Context, room string, from, until, after int64) ([]model.DanmakuMessage, error)
+	Withdraw(ctx context.Context, room, eventID string) error
+}
+
 type ChatHandler struct {
-	history *repo.MessageRepo
+	history historyStore
 	manager *ws.Manager
 }
 
-func NewChatHandler(history *repo.MessageRepo, m *ws.Manager) *ChatHandler {
+func NewChatHandler(history historyStore, m *ws.Manager) *ChatHandler {
 	return &ChatHandler{history, m}
 }
 

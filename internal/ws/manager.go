@@ -52,6 +52,7 @@ type Manager struct {
 	sendCapacity    int
 	BatchWindow     time.Duration
 	MinBatchViewers int
+	BatchArrivalGap time.Duration
 	Prepared        bool
 	dropped         atomic.Uint64
 	shardDrops      atomic.Uint64
@@ -126,6 +127,8 @@ func NewManager(sendCapacity, shards int) *Manager {
 		publisher:      infra.InitRedisClient(-1),
 		shardSeed:      maphash.MakeSeed(),
 		RedisClient:    rdb,
+
+		BatchArrivalGap: DefaultBatchArrivalGap,
 	}
 	for i := range shards {
 		m.publishQueues[i] = make(chan *model.WsPacket, BroadcastChanSize/shards)

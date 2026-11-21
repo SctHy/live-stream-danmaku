@@ -37,6 +37,19 @@
             </div>
             <span id="stats">在线 — · 赞 —</span>
           </div>
+          <details id="local-import">
+            <summary>本地样本</summary>
+            <label
+              >同时选择视频和弹幕 JSON
+              <input
+                id="sample-files"
+                type="file"
+                accept="video/*,.json"
+                multiple
+              />
+            </label>
+            <p id="sample-status" role="status"></p>
+          </details>
           <div class="screen">
             <video
               id="video"
@@ -66,7 +79,7 @@
         <aside>
           <h2 id="heading">实时弹幕</h2>
           <ol id="messages"></ol>
-          <details>
+          <details id="moderation-panel">
             <summary>房管操作</summary>
             <form id="moderation">
               <label

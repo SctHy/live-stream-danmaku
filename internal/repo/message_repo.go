@@ -4,7 +4,7 @@ package repo
 import (
 	"context"
 	"strconv"
-	"time" //IsZero()
+	"time"
 
 	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 
@@ -48,42 +48,6 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*model.DanmakuMessag
  AS batch(id, room, uid, body, sent, media_time)
  ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times, offsets)
 	return err
-}
-
-// GetPlayBackDanmaku fetches messages for video playback
-// (VOD video on demand mode).
-// It retrieves messages that happened AFTER specific timestamp.
-// queryTime: The current timestamp of the video player progress.
-func (r *MessageRepo) GetPlayBackDanmaku(roomID string, queryTime time.Time, limit int) ([]*model.DanmakuMessage, error) {
-	ctx := context.Background()
-	query := `SELECT id,coalesce(event_id,''),room_id,user_id::text,content,send_time FROM danmaku_messages WHERE room_id=$1 AND NOT EXISTS (SELECT 1 FROM danmaku_withdrawals w WHERE w.room_id=danmaku_messages.room_id AND w.event_id=danmaku_messages.event_id)`
-	if limit < 0 {
-		limit = -1
-	}
-	args := []any{roomID, limit}
-	if !queryTime.IsZero() {
-		query += " AND send_time >= $3"
-		args = append(args, queryTime)
-	}
-	rows, err := r.db.Query(ctx, query+" ORDER BY send_time,id LIMIT NULLIF($2::int,-1)", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	msgs := make([]*model.DanmakuMessage, 0)
-	for rows.Next() {
-		var d model.DanmakuMessage
-		var uid string
-		if err := rows.Scan(&d.ID, &d.EventID, &d.RoomID, &uid, &d.Content, &d.SendTime); err != nil {
-			return nil, err
-		}
-		d.UserID, err = strconv.ParseUint(uid, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		msgs = append(msgs, &d)
-	}
-	return msgs, rows.Err()
 }
 
 // Playback pages through a half-open media interval. The row id breaks ties at the same millisecond.
