@@ -19,10 +19,11 @@ type subscription struct {
 }
 
 type shard struct {
-	mu      sync.RWMutex
-	conn    *redis.PubSub
-	rooms   map[string]*subscription
-	pending map[string]*subscription
+	commands sync.Mutex // Order room joins and leaves without blocking the receive loop.
+	mu       sync.RWMutex
+	conn     *redis.PubSub
+	rooms    map[string]*subscription
+	pending  map[string]*subscription
 }
 
 type Mux struct {
@@ -49,18 +50,22 @@ func (m *Mux) shard(room string) *shard {
 
 func (m *Mux) Subscribe(ctx context.Context, room string, deliver func([]byte)) (<-chan struct{}, error) {
 	s := m.shard(room)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.commands.Lock()
+	defer s.commands.Unlock()
 	channel := fmt.Sprintf("dm:{%s}:pubsub", room)
 	ready := make(chan struct{})
 	// A unique acknowledgement distinguishes rapid leave/rejoin generations.
 	ack := channel + ":ready:" + rand.Text()
 	sub := &subscription{ack, ready, deliver}
+	s.mu.Lock()
 	s.rooms[channel] = sub
 	s.pending[ack] = sub
+	s.mu.Unlock()
 	if err := s.conn.Subscribe(ctx, channel, ack); err != nil {
+		s.mu.Lock()
 		delete(s.rooms, channel)
 		delete(s.pending, ack)
+		s.mu.Unlock()
 		s.conn.Unsubscribe(ctx, channel, ack)
 		return nil, err
 	}
@@ -69,34 +74,43 @@ func (m *Mux) Subscribe(ctx context.Context, room string, deliver func([]byte)) 
 
 func (m *Mux) Unsubscribe(ctx context.Context, room string) {
 	s := m.shard(room)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.commands.Lock()
+	defer s.commands.Unlock()
 	channel := fmt.Sprintf("dm:{%s}:pubsub", room)
+	s.mu.Lock()
 	sub := s.rooms[channel]
 	if sub == nil {
+		s.mu.Unlock()
 		return
 	}
 	delete(s.rooms, channel)
+	channels := []string{channel}
 	if sub.ready != nil {
 		delete(s.pending, sub.ack)
-		s.conn.Unsubscribe(ctx, channel, sub.ack)
-	} else {
-		s.conn.Unsubscribe(ctx, channel)
+		channels = append(channels, sub.ack)
 	}
+	s.mu.Unlock()
+	s.conn.Unsubscribe(ctx, channels...)
 }
 
 func (s *shard) receive() {
 	for event := range s.conn.ChannelWithSubscriptions() {
 		switch v := event.(type) {
 		case *redis.Subscription:
+			if v.Kind != "subscribe" {
+				continue
+			}
 			s.mu.Lock()
-			if sub := s.pending[v.Channel]; v.Kind == "subscribe" && sub != nil {
+			sub := s.pending[v.Channel]
+			if sub != nil {
 				close(sub.ready)
 				sub.ready = nil
 				delete(s.pending, v.Channel)
-				s.conn.Unsubscribe(context.Background(), v.Channel)
 			}
 			s.mu.Unlock()
+			if sub != nil {
+				s.conn.Unsubscribe(context.Background(), v.Channel)
+			}
 		case *redis.Message:
 			s.mu.RLock()
 			sub := s.rooms[v.Channel]

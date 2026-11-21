@@ -31,7 +31,7 @@ func (m *Hub) handleRegister(client *Client) {
 		}
 		m.ready[client.RoomID] = ready
 
-		m.log.Info("[MANAGER] New room created on server", "room", client.RoomID)
+		m.log.Info("Room subscription started", "room", client.RoomID)
 	}
 
 	m.Rooms[client.RoomID][client] = struct{}{}
@@ -60,7 +60,7 @@ func (m *Hub) handleUnregister(client *Client) {
 					cancel()
 					m.mux.Unsubscribe(m.life, client.RoomID)
 					delete(m.cancelSub, client.RoomID)
-					m.log.Info("[MANAGER] Room subscription stopped", "room", client.RoomID)
+					m.log.Info("Room subscription stopped", "room", client.RoomID)
 				}
 			}
 

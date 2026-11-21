@@ -4,22 +4,29 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 func TestMigrationWaitsForOldConnectionOrDeadline(t *testing.T) {
-	first := &Client{migration: make(chan struct{}, 1), done: make(chan struct{})}
-	second := &Client{migration: make(chan struct{}, 1), done: make(chan struct{})}
+	first := &Client{migration: make(chan *outboundFrame, 1), done: make(chan struct{})}
+	second := &Client{migration: make(chan *outboundFrame, 1), done: make(chan struct{})}
 	m := Hub{Rooms: map[string]map[*Client]struct{}{"room": {first: {}, second: {}}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	done := make(chan struct{})
 	go func() { m.Migrate(ctx, 2, 1, time.Millisecond); close(done) }()
+	var notice *outboundFrame
 	select {
-	case <-first.migration:
-	case <-second.migration:
+	case notice = <-first.migration:
+	case notice = <-second.migration:
 		first, second = second, first
 	case <-ctx.Done():
 		t.Fatal("missing invitation")
+	}
+	packets, err := protocol.DecodePackets(notice.payload)
+	if err != nil || len(packets) != 1 || packets[0].Type != protocol.TypeMigrate || string(packets[0].Data) != "{}" {
+		t.Fatalf("unexpected notice: %s", notice.payload)
 	}
 	if !m.Retiring() {
 		t.Fatal("gateway still ready")
@@ -38,7 +45,10 @@ func TestMigrationWaitsForOldConnectionOrDeadline(t *testing.T) {
 	}
 	first.Close()
 	select {
-	case <-second.migration:
+	case next := <-second.migration:
+		if next != notice {
+			t.Fatal("migration frame was not shared")
+		}
 	case <-ctx.Done():
 		t.Fatal("slot was not reused")
 	}

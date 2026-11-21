@@ -25,6 +25,11 @@ func (m *Hub) Migrate(ctx context.Context, batch, limit int, interval time.Durat
 		}
 	}
 	m.mu.Unlock()
+	if len(waiting) == 0 {
+		return
+	}
+	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeMigrate, Data: json.RawMessage(`{}`)})
+	notice := &outboundFrame{payload: wire, count: 1}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -49,16 +54,11 @@ func (m *Hub) Migrate(ctx context.Context, batch, limit int, interval time.Durat
 			count = min(count, limit-len(active))
 		}
 		for _, c := range waiting[:count] {
-			c.migration <- struct{}{}
+			c.migration <- notice
 			active = append(active, c)
 		}
 		waiting = waiting[count:]
 	}
-}
-
-func migrationNotice() *outboundFrame {
-	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeMigrate, Data: json.RawMessage(`{}`)})
-	return &outboundFrame{payload: wire, count: 1}
 }
 
 func (m *Hub) Retiring() bool { return m.retiring.Load() }

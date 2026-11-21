@@ -102,7 +102,7 @@ func New(log *slog.Logger, producer *mq.Producer, store *pubsub.Store, sendCapac
 }
 
 func (m *Hub) Start() {
-	m.log.Info("[MANAGER] Multi-room Hub started")
+	m.log.Info("Hub started")
 	m.StartWorkers()
 	close(m.started)
 	statsTicker := time.NewTicker(statsInterval)

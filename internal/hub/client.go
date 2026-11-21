@@ -18,7 +18,7 @@ const (
 )
 
 type Client struct {
-	migration        chan struct{}
+	migration        chan *outboundFrame
 	registered       chan struct{}
 	subscription     <-chan struct{}
 	consecutiveDrops atomic.Uint32
@@ -52,7 +52,7 @@ func (m *Hub) NewClient(uid uint64, room string, conn *websocket.Conn) *Client {
 }
 
 // EnableMigration is negotiated before the client joins the room.
-func (c *Client) EnableMigration() { c.migration = make(chan struct{}, 1) }
+func (c *Client) EnableMigration() { c.migration = make(chan *outboundFrame, 1) }
 
 func (c *Client) ReadPump(manager *Hub) {
 	defer func() {
@@ -72,7 +72,7 @@ func (c *Client) ReadPump(manager *Hub) {
 				websocket.CloseGoingAway,         // 1001: browser navigation leave/refreshing
 				websocket.CloseAbnormalClosure) { //1006:connection closed abnormally
 				//log when error does not belong to reasons mentioned above
-				manager.log.Error("[CLIENT] Read error",
+				manager.log.Error("WebSocket read failed",
 					"uid", c.UserID,
 					"error", err,
 				)
@@ -82,7 +82,7 @@ func (c *Client) ReadPump(manager *Hub) {
 
 		var packet protocol.WsPacket
 		if err := json.Unmarshal(messageBytes, &packet); err != nil {
-			manager.log.Error("[CLIENT]Invalid JSON format", "uid", c.UserID)
+			manager.log.Error("Invalid WebSocket JSON", "uid", c.UserID)
 			continue
 		}
 
@@ -110,8 +110,7 @@ func (c *Client) WritePump() {
 			continue
 		case message = <-c.Send:
 			chat = true
-		case <-c.migration:
-			message = migrationNotice()
+		case message = <-c.migration:
 		case message = <-c.stats:
 		}
 		c.Socket.SetWriteDeadline(time.Now().Add(WriteWait))
