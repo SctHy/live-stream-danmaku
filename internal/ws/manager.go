@@ -30,6 +30,7 @@ type Manager struct {
 	life      context.Context
 	stop      context.CancelFunc
 	drainOnce sync.Once
+	retiring  atomic.Bool
 
 	// ServerID is a unique identifier for this running instance.
 	// It is used to separate stats in Redis.
@@ -235,7 +236,7 @@ func (m *Manager) handleRegister(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.life != nil && m.life.Err() != nil {
+	if m.Retiring() || (m.life != nil && m.life.Err() != nil) {
 		client.Close()
 		return
 	}

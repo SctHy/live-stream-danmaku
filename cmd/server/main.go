@@ -30,9 +30,12 @@ func main() {
 	minViewers := flag.Int("batch-min-viewers", 128, "minimum batch-capable viewers")
 	prepared := flag.Bool("prepared", false, "share prepared frames")
 	shards := flag.Int("room-shards", ws.RoomShards, "number of room workers")
+	migrationTimeout := flag.Duration("migration-timeout", 30*time.Second, "maximum time for rolling handoff (zero closes immediately)")
+	migrationBatch := flag.Int("migration-batch", 100, "maximum handoff invitations per 100ms")
+	migrationLimit := flag.Int("migration-inflight", 64, "maximum outstanding handoffs (zero uses fixed rate)")
 	flag.Parse()
-	if *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 {
-		logger.Log.Fatal("invalid fanout configuration")
+	if *migrationTimeout < 0 || *migrationBatch < 1 || *migrationLimit < 0 || *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 {
+		logger.Log.Fatal("invalid gateway configuration")
 	}
 	db := infra.InitDB()
 	defer db.Close()
@@ -48,6 +51,10 @@ func main() {
 	api.NewChatHandler(repo.NewMessageRepo(db), m).Routes(r)
 	r.GET("/livez", func(c *gin.Context) { c.Status(200) })
 	r.GET("/readyz", func(c *gin.Context) {
+		if m.Retiring() {
+			c.Status(503)
+			return
+		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
 		defer cancel()
 		if err := m.RedisClient.Ping(ctx).Err(); err != nil {
@@ -72,6 +79,9 @@ func main() {
 			logger.Log.Fatal("HTTP listener", zap.Error(err))
 		}
 	case <-ctx.Done():
+		migration, finish := context.WithTimeout(context.Background(), *migrationTimeout)
+		m.Migrate(migration, *migrationBatch, *migrationLimit, 100*time.Millisecond)
+		finish()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdown)

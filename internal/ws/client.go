@@ -18,6 +18,7 @@ const (
 
 type Client struct {
 	Session          bool
+	migration        chan struct{}
 	registered       chan struct{}
 	subscription     <-chan struct{}
 	consecutiveDrops atomic.Uint32
@@ -49,6 +50,9 @@ func (m *Manager) NewClient(uid uint64, name, room string, conn *websocket.Conn)
 		done:       make(chan struct{}),
 	}
 }
+
+// EnableMigration is negotiated before the client joins the room.
+func (c *Client) EnableMigration() { c.migration = make(chan struct{}, 1) }
 
 // ReadPump: clients read from websocket to receive message, then send to manager to broadcast
 func (c *Client) ReadPump(manager *Manager) {
@@ -103,6 +107,8 @@ func (c *Client) WritePump() {
 			return
 		case message = <-c.Send:
 			chat = true
+		case <-c.migration:
+			message = migrationNotice
 		case message = <-c.stats:
 		}
 		c.Socket.SetWriteDeadline(time.Now().Add(5 * time.Second))

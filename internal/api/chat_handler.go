@@ -134,12 +134,19 @@ func (h *ChatHandler) ConnectWebSocket(c *gin.Context) {
 	h.connect(c, uid, room, false)
 }
 func (h *ChatHandler) connect(c *gin.Context, uid uint64, room string, session bool) {
+	if h.manager.Retiring() {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
 	client := h.manager.NewClient(uid, c.Query("name"), room, conn)
 	client.Session = session
+	if session && c.Query("migrate") == "1" {
+		client.EnableMigration()
+	}
 	if !h.manager.Join(c.Request.Context(), client) {
 		client.Close()
 		return
