@@ -29,8 +29,8 @@ video.addEventListener('loadedmetadata', alignLiveClip)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) alignLiveClip()
 })
-let lastSent = ''
-let awaitingReply = false
+let pendingSend = null
+let userID = null
 let visible = new Map(),
   replayGeneration = 0,
   replayEvents = [],
@@ -40,6 +40,10 @@ const feedback = (text) => {
 }
 function controls() {
   for (const id of ['send', 'like', 'message']) $(id).disabled = !ready || !live
+
+  $('send').disabled ||= !!pendingSend
+  $('retry').hidden = !pendingSend
+  $('retry').disabled = !ready || !live
 }
 function clear() {
   visible.clear()
@@ -88,8 +92,9 @@ function apply(p, animate) {
   if (p.type === 105) withdraw(p.data.event_id)
   if (live && p.type === 101) {
     show(p.data, animate)
-    if (lastSent && p.data.client_msg_id === lastSent) {
-      awaitingReply = false
+    if (pendingSend && p.data.user_id === userID && p.data.client_msg_id === pendingSend.data.client_msg_id) {
+      pendingSend = null
+      controls()
       feedback('弹幕已送达')
     }
   }
@@ -110,7 +115,12 @@ async function json(url, options) {
 }
 async function connect() {
   try {
-    await json('/api/session', { method: 'POST' })
+    const sessionInfo = await json('/api/session', { method: 'POST' })
+    if (userID !== sessionInfo.user_id && pendingSend) {
+      pendingSend = null
+      feedback('身份已变更，上一条的结果请查看近期弹幕')
+    }
+    userID = sessionInfo.user_id
     const ws = new WebSocket(
       location.origin.replace(/^http/, 'ws') + base + '/live',
       'danmaku.batch.v1',
@@ -173,12 +183,18 @@ async function connect() {
           if (p.data.pos && cursor && !older(p.data.pos, cursor)) void sync()
         } else if (
           p.type === 104 &&
-          (!p.data.client_msg_id || p.data.client_msg_id === lastSent)
+          (!p.data.client_msg_id || p.data.client_msg_id === pendingSend?.data.client_msg_id)
         ) {
-          if (p.data.client_msg_id) awaitingReply = false
+          if (pendingSend && p.data.client_msg_id && p.data.status !== 'unavailable') {
+            if (p.data.status !== 'accepted' && !$('message').value) {
+              $('message').value = pendingSend.data.content
+            }
+            pendingSend = null
+          }
+          controls()
           feedback(
             {
-              accepted: '网关已接受',
+              accepted: '弹幕已发布',
               invalid: '内容无效',
               muted: '当前已禁言',
               rate_limited: '发送过快',
@@ -195,7 +211,7 @@ async function connect() {
 }
 function reconnect() {
   ready = false
-  if (awaitingReply) feedback('连接中断，最后一条弹幕的发送结果待确认')
+  if (pendingSend) feedback('连接中断，最后一条弹幕的发送结果待确认')
   controls()
   $('connection').textContent = '正在重连'
   setTimeout(
@@ -205,24 +221,32 @@ function reconnect() {
 }
 $('compose').onsubmit = (e) => {
   e.preventDefault()
-  if (!ready || !live || !wsOpen()) return
+  if (pendingSend || !ready || !live || !wsOpen()) return
   const text = $('message').value.trim()
   if (!text) return
-  lastSent = crypto.randomUUID()
-  awaitingReply = true
-  socket.send(
-    JSON.stringify({
-      type: 101,
-      data: {
-        client_msg_id: lastSent,
-        content: text,
-        video_offset_ms: Math.floor(video.currentTime * 1000),
-      },
-    }),
-  )
+  pendingSend = {
+    started: Date.now(),
+    data: {
+      client_msg_id: crypto.randomUUID(),
+      content: text,
+      video_offset_ms: Math.floor(video.currentTime * 1000),
+    },
+  }
+  sendPending()
   $('message').value = ''
   feedback('发送中')
 }
+function sendPending() {
+  if (!pendingSend || !wsOpen() || !ready || !live) return
+  if (Date.now() - pendingSend.started >= 9 * 60 * 1000) {
+    pendingSend = null
+    feedback('重试期限已过，请在近期弹幕或回放中确认')
+  } else {
+    socket.send(JSON.stringify({type: 101, data: pendingSend.data}))
+  }
+  controls()
+}
+$('retry').onclick = sendPending
 function wsOpen() {
   return socket?.readyState === WebSocket.OPEN
 }

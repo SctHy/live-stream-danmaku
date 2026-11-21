@@ -22,7 +22,7 @@
 | --- | --- |
 | 101 | 发弹幕可带 `client_msg_id` 和 `video_offset_ms`，下行带服务端生成的 `event_id` |
 | 102、103 | 房间统计快照、点赞。单次点赞 1–20 |
-| 104 | 发送回执，带原 `client_msg_id`。可返回 `accepted`、`invalid`、`overloaded`、`muted`、`rate_limited` 或 `unavailable` |
+| 104 | 发送回执，带原 `client_msg_id`；成功时带原 `event_id`。可返回 `accepted`、`invalid`、`overloaded`、`muted`、`rate_limited` 或 `unavailable` |
 | 105 | 按 `event_id` 撤回弹幕 |
 | 106 | 房间订阅就绪，含服务器时间 |
 
@@ -38,7 +38,7 @@ Redis 在一次脚本调用中追加房间 Stream 并发布事件。每场保留
 
 撤回先记录 PostgreSQL 删除标记，即使原消息随后才入库，回放查询也会隐藏它。撤回事件会更新在线客户端和重连窗口。若实时通知失败，接口返回 503，同一撤回可重试。持续慢读的连接达到 8 次连续帧入队失败后会被关闭。在线人数和点赞只保留最新的待发快照。
 
-`/livez` 检查进程，`/readyz` 检查 Redis 和 PostgreSQL。`/metrics` 返回 JSON，包含分片丢弃、单连接丢弃、发布队列拒绝、队列等待总时长、实时日志错误及历史队列长度。排查归档还需看消费者 lag。正常退出时网关给已接收的发布和历史生产者最多 5 秒排空，依赖故障和超时仍可能导致漏存。
+`/livez` 检查进程，`/readyz` 检查 Redis 和 PostgreSQL。`/metrics` 返回 JSON，包含分片丢弃、单连接丢弃、发布队列拒绝、队列等待总时长、实时日志错误及历史队列长度。浏览器发言的待归档量用 Redis 命令 `XLEN dm:archive:pending` 查看，并结合 Kafka 消费组 lag 排查。当前页面在首次发送后 9 分钟内可用原请求重试，服务端去重保留 10 分钟。刷新页面会清除本地待确认请求。
 
 ## 本机验收
 
