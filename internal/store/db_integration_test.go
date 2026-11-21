@@ -1,4 +1,4 @@
-package infra
+package store
 
 import (
 	"context"
@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
-	"github.com/scthy/live-stream-danmaku/internal/repo"
 )
 
 // Every run gets its own schema, including its version ledger.
@@ -65,7 +64,7 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 			if t.Failed() {
 				t.FailNow()
 			}
-			r := repo.NewMessageRepo(pool)
+			r := NewMessageRepo(pool)
 			batch := []*protocol.DanmakuMessage{{EventID: "same", RoomID: "x", Content: "now", UserID: ^uint64(0), SendTime: time.Now()}}
 			for range 2 {
 				if err := r.SaveBatch(ctx, batch); err != nil {

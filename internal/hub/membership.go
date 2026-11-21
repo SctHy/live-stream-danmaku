@@ -2,9 +2,6 @@ package hub
 
 import (
 	"context" // context is used to manage the lifecycle of the Redis client
-
-	"github.com/scthy/live-stream-danmaku/internal/logger"
-	"go.uber.org/zap"
 )
 
 func (m *Hub) handleRegister(client *Client) {
@@ -39,7 +36,7 @@ func (m *Hub) handleRegister(client *Client) {
 		}
 		m.ready[client.RoomID] = ready
 		go m.consumeRoom(ctx, client.RoomID, messages)
-		logger.Log.Info("[MANAGER] New room created on server", zap.String("room", client.RoomID))
+		m.log.Info("[MANAGER] New room created on server", "room", client.RoomID)
 	}
 
 	m.Rooms[client.RoomID][client] = struct{}{}
@@ -68,7 +65,7 @@ func (m *Hub) handleUnregister(client *Client) {
 					cancel()
 					m.mux.Unsubscribe(m.life, client.RoomID)
 					delete(m.cancelSub, client.RoomID)
-					logger.Log.Info("[MANAGER] Room subscription stopped", zap.String("room", client.RoomID))
+					m.log.Info("[MANAGER] Room subscription stopped", "room", client.RoomID)
 				}
 			}
 

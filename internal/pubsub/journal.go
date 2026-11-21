@@ -27,14 +27,14 @@ local wire='{"pos":"'..id..'","prev":"'..prev..'","packet":'..ARGV[1]..'}'
 redis.call('PUBLISH',KEYS[2],wire)
 `
 
-var appendEvent = redis.NewScript(journalLua + `return id`)
+const appendEventLua = journalLua + `return id`
 
 func (s *Store) Journal(ctx context.Context, room string, payload []byte) error {
 	r := s.r
-	return appendEvent.Run(ctx, r, []string{"dm:{" + room + "}:recent", fmt.Sprintf(KeyRoomPubSub, room)}, string(payload), rand.Text()).Err()
+	return s.appendEvent.Run(ctx, r, []string{"dm:{" + room + "}:recent", fmt.Sprintf(KeyRoomPubSub, room)}, string(payload), rand.Text()).Err()
 }
 
-var acceptEvent = redis.NewScript(`
+const acceptEventLua = `
 local existing=redis.call('GET',KEYS[3])
 if existing then return {'accepted',existing} end
 if redis.call('EXISTS',KEYS[4])==1 then return {'muted',''} end
@@ -44,7 +44,7 @@ if n>8 then return {'rate_limited',''} end
 ` + journalLua + `
 redis.call('SET',KEYS[3],ARGV[3],'EX',600)
 return {'new',ARGV[3]}
-`)
+`
 
 func (s *Store) AcceptDanmaku(ctx context.Context, msg protocol.DanmakuMessage, payload []byte) (string, string, error) {
 	r := s.r
@@ -61,7 +61,7 @@ func (s *Store) AcceptDanmaku(ctx context.Context, msg protocol.DanmakuMessage, 
 		prefix + "mute:" + user,
 		prefix + fmt.Sprintf("rate:%s:%d", user, protocol.TypeDanmaku),
 	}
-	result, err := acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID).StringSlice()
+	result, err := s.acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID).StringSlice()
 	if err != nil {
 		return "unavailable", "", err
 	}
@@ -142,16 +142,16 @@ func StreamPosition(entry redis.XMessage) string {
 	return epoch + "@" + entry.ID
 }
 
-var allowAction = redis.NewScript(`
+const allowActionLua = `
 if redis.call('EXISTS',KEYS[1])==1 then return 'muted' end
 local n=redis.call('INCR',KEYS[2])
 if n==1 then redis.call('PEXPIRE',KEYS[2],ARGV[1]) end
 if n>tonumber(ARGV[2]) then return 'rate_limited' end
-return 'ok'`)
+return 'ok'`
 
 func (s *Store) Policy(ctx context.Context, room string, uid uint64, action int) (string, error) {
 	r := s.r
 	prefix := fmt.Sprintf("dm:{%s}:", room)
 	user := fmt.Sprint(uid)
-	return allowAction.Run(ctx, r, []string{prefix + "mute:" + user, prefix + fmt.Sprintf("rate:%s:%d", user, action)}, time.Second.Milliseconds(), 8).Text()
+	return s.allowAction.Run(ctx, r, []string{prefix + "mute:" + user, prefix + fmt.Sprintf("rate:%s:%d", user, action)}, time.Second.Milliseconds(), 8).Text()
 }

@@ -7,10 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/infra"
-	"github.com/scthy/live-stream-danmaku/internal/logger"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (m *Hub) reply(c *Client, id, status string) {
@@ -43,7 +40,7 @@ func (m *Hub) dispatch(c *Client, packet protocol.WsPacket) {
 	case protocol.TypeLike:
 		m.handleLike(c, packet.Data)
 	default:
-		logger.Log.Warn("Unknown WebSocket message type", zap.Int("type", packet.Type))
+		m.log.Warn("Unknown WebSocket message type", "type", packet.Type)
 	}
 }
 
@@ -73,11 +70,7 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 			m.liveFailures.Add(1)
 		}
 		if status == "new" {
-			select {
-			case m.historyQueue <- wire:
-			default:
-				infra.HistoryQueueDrops.Add(1)
-			}
+			m.producer.Publish(c.RoomID, wire)
 			status = "accepted"
 		}
 		m.receipt(c, input.ClientMsgID, status, eventID)

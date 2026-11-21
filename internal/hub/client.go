@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/scthy/live-stream-danmaku/internal/logger"
+
 	"github.com/scthy/live-stream-danmaku/internal/protocol" //database structures
-	"go.uber.org/zap"
 )
 
 const (
@@ -75,9 +74,9 @@ func (c *Client) ReadPump(manager *Hub) {
 				websocket.CloseGoingAway,         // 1001: browser navigation leave/refreshing
 				websocket.CloseAbnormalClosure) { //1006:connection closed abnormally
 				//log when error does not belong to reasons mentioned above
-				logger.Log.Error("[CLIENT] Read error",
-					zap.Uint64("uid", c.UserID),
-					zap.Error(err),
+				manager.log.Error("[CLIENT] Read error",
+					"uid", c.UserID,
+					"error", err,
 				)
 			}
 			break // if read error, break the loop
@@ -86,7 +85,7 @@ func (c *Client) ReadPump(manager *Hub) {
 		// 2. Parse the Envelope (WsPacket)
 		var packet protocol.WsPacket
 		if err := json.Unmarshal(messageBytes, &packet); err != nil {
-			logger.Log.Error("[CLIENT]Invalid JSON format", zap.Uint64("uid", c.UserID))
+			manager.log.Error("[CLIENT]Invalid JSON format", "uid", c.UserID)
 			continue
 		}
 
@@ -161,6 +160,6 @@ func (c *Client) Close() {
 			c.Socket.Close()
 		}
 		// Note: We DO NOT close c.Send here to prevent panic in workers
-		// logger.Log.Info("[CLIENT] Connection closed safely", zap.Uint64("uid", c.UserID))
+		// manager.log.Info("[CLIENT] Connection closed safely", "uid", c.UserID)
 	})
 }

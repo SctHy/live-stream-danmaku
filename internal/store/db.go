@@ -1,4 +1,4 @@
-package infra
+package store
 
 import (
 	"context"
@@ -9,14 +9,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/scthy/live-stream-danmaku/internal/logger"
-	"go.uber.org/zap"
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-func InitDB() *pgxpool.Pool {
+func Open() (*pgxpool.Pool, error) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		dsn = "postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable"
@@ -25,13 +23,13 @@ func InitDB() *pgxpool.Pool {
 	defer cancel()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		logger.Log.Fatal("Invalid PostgreSQL configuration", zap.Error(err))
+		return nil, err
 	}
 	if err := migrate(ctx, pool); err != nil {
 		pool.Close()
-		logger.Log.Fatal("PostgreSQL migration failed", zap.Error(err))
+		return nil, err
 	}
-	return pool
+	return pool, nil
 }
 
 // Version files are applied in lexical order under the same lock as the old AutoMigrate.

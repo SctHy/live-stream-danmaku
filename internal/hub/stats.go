@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"time" //broadcast stats data timer
 
-	"github.com/scthy/live-stream-danmaku/internal/logger"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
-	"go.uber.org/zap"
 )
 
 func (m *Hub) broadcastStats() {
@@ -36,7 +34,7 @@ func (m *Hub) broadcastStats() {
 		defer cancel()
 		stats, err := m.store.SnapshotStats(ctx, m.ServerID, chunk, currentBatchLikes, BroadCastInterVal*2+time.Second)
 		if err != nil {
-			logger.Log.Warn("Room statistics unavailable", zap.Error(err))
+			m.log.Warn("Room statistics unavailable", "error", err)
 			return
 		}
 		for room, s := range stats {

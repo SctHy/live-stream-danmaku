@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
@@ -13,8 +14,7 @@ import (
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
-// Point both URLs at gateways sharing a dedicated stack. Kafka can be stopped
-// before the test and restarted while the test waits for playback.
+// Both gateways and the archiver must use the same dedicated stack.
 func TestRetryAcrossGateways(t *testing.T) {
 	a, b := os.Getenv("DANMAKU_TEST_GATEWAY_A"), os.Getenv("DANMAKU_TEST_GATEWAY_B")
 	if a == "" || b == "" {
@@ -44,9 +44,20 @@ func TestRetryAcrossGateways(t *testing.T) {
 		return conn
 	}
 	req := map[string]any{"type": 101, "data": map[string]any{"content": "retry", "video_offset_ms": 42, "client_msg_id": "retry-1"}}
+	observer := dial(b)
+	defer observer.Close()
 	first := dial(a)
 	if err := first.WriteJSON(req); err != nil {
 		t.Fatal(err)
+	}
+	var live protocol.WsPacket
+	for live.Type != protocol.TypeDanmaku {
+		if err := observer.ReadJSON(&live); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if live.Position == "" || live.Previous != "0-0" {
+		t.Fatalf("bad cross-gateway cursor %+v", live)
 	}
 	// Observe acceptance independently; the sender never reads its receipt.
 	read := func(suffix string) []json.RawMessage {
@@ -70,6 +81,9 @@ func TestRetryAcrossGateways(t *testing.T) {
 	events := read("/recent")
 	if len(events) != 1 {
 		t.Fatalf("first event count %d", len(events))
+	}
+	if len(read("/recent?after="+live.Position)) != 0 {
+		t.Fatal("recovery repeated acknowledged event")
 	}
 	var original struct{ Data protocol.DanmakuMessage }
 	if err := json.Unmarshal(events[0], &original); err != nil || original.Data.EventID == "" {
@@ -116,6 +130,47 @@ func TestRetryAcrossGateways(t *testing.T) {
 			var row protocol.DanmakuMessage
 			if len(rows) != 1 || json.Unmarshal(rows[0], &row) != nil || row.EventID != original.Data.EventID {
 				t.Fatal("unexpected archive", rows)
+			}
+			if token := os.Getenv("DANMAKU_MOD_TOKEN"); token != "" && os.Getenv("DANMAKU_MOD_ROOM") == "retry" {
+				moderate := func(body any) {
+					data, _ := json.Marshal(body)
+					req, _ := http.NewRequest("POST", a+path+"/moderate", bytes.NewReader(data))
+					req.Header.Set("Authorization", "Bearer "+token)
+					resp, err := http.DefaultClient.Do(req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer resp.Body.Close()
+					if resp.StatusCode != 204 {
+						t.Fatal(resp.Status)
+					}
+				}
+				moderate(map[string]any{"action": "mute", "user_id": row.UserID, "seconds": 10})
+				muted := dial(b)
+				defer muted.Close()
+				req["data"] = map[string]any{"content": "blocked", "client_msg_id": "muted-test"}
+				if err := muted.WriteJSON(req); err != nil {
+					t.Fatal(err)
+				}
+				for {
+					var p protocol.WsPacket
+					if err := muted.ReadJSON(&p); err != nil {
+						t.Fatal(err)
+					}
+					if p.Type == protocol.TypeReceipt {
+						var receipt protocol.Receipt
+						if json.Unmarshal(p.Data, &receipt) != nil || receipt.Status != "muted" {
+							t.Fatal(string(p.Data))
+						}
+						break
+					}
+				}
+				moderate(map[string]any{"action": "withdraw", "event_id": row.EventID})
+				suffix := read("/recent?after=" + live.Position)
+				var withdrawal protocol.WsPacket
+				if len(suffix) != 1 || json.Unmarshal(suffix[0], &withdrawal) != nil || withdrawal.Type != protocol.TypeWithdraw || withdrawal.Previous != live.Position || len(read("/playback?from=0&until=100")) != 0 {
+					t.Fatal("withdrawal missing in recovery or playback")
+				}
 			}
 			return
 		}

@@ -18,7 +18,7 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 	}
 	r := redis.NewClient(&redis.Options{Addr: addr})
 	defer r.Close()
-	store := Store{r}
+	store := newStore(r)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	room := "check/" + rand.Text()

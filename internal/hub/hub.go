@@ -3,17 +3,15 @@ package hub
 import (
 	"context" // context is used to manage the lifecycle of the Redis client
 	"fmt"
+	"github.com/scthy/live-stream-danmaku/internal/mq"
 	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 	"hash/maphash"
+	"log/slog"
 	"math/rand"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time" //broadcast stats data timer
-
-	"github.com/scthy/live-stream-danmaku/internal/infra"
-	"github.com/scthy/live-stream-danmaku/internal/logger"
-	"go.uber.org/zap"
 )
 
 type BroadcastJob struct {
@@ -23,6 +21,8 @@ type BroadcastJob struct {
 }
 
 type Hub struct {
+	log       *slog.Logger
+	producer  *mq.Producer
 	life      context.Context
 	stop      context.CancelFunc
 	drainOnce sync.Once
@@ -39,7 +39,6 @@ type Hub struct {
 	ingress   sync.RWMutex
 	draining  bool
 
-	historyDone     chan struct{}
 	started         chan struct{}
 	sendCapacity    int
 	BatchWindow     time.Duration
@@ -48,7 +47,6 @@ type Hub struct {
 	Metrics
 	statsRunning atomic.Bool
 	ready        map[string]<-chan struct{}
-	historyQueue chan []byte
 	store        *pubsub.Store
 
 	Rooms map[string]map[*Client]struct{}
@@ -72,17 +70,16 @@ const (
 	RoomShards           = 32
 )
 
-func New(store *pubsub.Store, sendCapacity, shards, muxShards int) *Hub {
+func New(log *slog.Logger, producer *mq.Producer, store *pubsub.Store, sendCapacity, shards, muxShards int) *Hub {
 
 	hostname, _ := os.Hostname()
 	serverID := fmt.Sprintf("%s-%d", hostname, rand.Intn(100000))
 
 	life, cancel := context.WithCancel(context.Background())
 	m := &Hub{
-		life: life, stop: cancel,
+		log: log, producer: producer, life: life, stop: cancel,
 		ServerID:       serverID,
 		started:        make(chan struct{}),
-		historyDone:    make(chan struct{}),
 		Register:       make(chan *Client),
 		Unregister:     make(chan *Client),
 		localLikes:     make(map[string]uint64),
@@ -93,7 +90,6 @@ func New(store *pubsub.Store, sendCapacity, shards, muxShards int) *Hub {
 		mux:            store.Mux(life, muxShards),
 		deliveryQueues: make([]chan *BroadcastJob, shards),
 		sendCapacity:   sendCapacity,
-		historyQueue:   make(chan []byte, infra.ProducerChanBufSize),
 		store:          store,
 		shardSeed:      maphash.MakeSeed(),
 
@@ -107,9 +103,8 @@ func New(store *pubsub.Store, sendCapacity, shards, muxShards int) *Hub {
 }
 
 func (m *Hub) Start() {
-	logger.Log.Info("[MANAGER] Multi-room Hub started")
+	m.log.Info("[MANAGER] Multi-room Hub started")
 	m.StartWorkers()
-	go func() { defer close(m.historyDone); infra.PublishHistory(m.historyQueue) }()
 	close(m.started)
 	statsTicker := time.NewTicker(BroadCastInterVal)
 	defer statsTicker.Stop()
@@ -125,9 +120,8 @@ func (m *Hub) Start() {
 		case <-statsTicker.C:
 
 			if n := m.dropped.Swap(0); n > 0 {
-				logger.Log.Warn("Live delivery dropped", zap.Uint64("recipient_messages", n))
+				m.log.Warn("Live delivery dropped", "recipient_messages", n)
 			}
-			infra.ReportDeliveryFailures()
 			if m.statsRunning.CompareAndSwap(false, true) {
 				go func() { defer m.statsRunning.Store(false); m.broadcastStats() }()
 			}
@@ -150,16 +144,10 @@ func (m *Hub) Drain(ctx context.Context) error {
 	m.drainOnce.Do(func() {
 		m.ingress.Lock()
 		m.draining = true
-		close(m.historyQueue)
 		m.ingress.Unlock()
 		m.stop()
 		m.CloseClients()
 		m.mux.Close()
 	})
-	select {
-	case <-m.historyDone:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return m.producer.Drain(ctx)
 }

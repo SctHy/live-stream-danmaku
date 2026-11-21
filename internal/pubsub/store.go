@@ -15,13 +15,16 @@ const (
 	KeyRoomPubSub       = "dm:{%s}:pubsub"
 )
 
-type Store struct{ r redis.UniversalClient }
+type Store struct {
+	r                                     redis.UniversalClient
+	appendEvent, acceptEvent, allowAction *redis.Script
+}
 
 func Open(addr string) *Store {
 	if addr == "" {
 		addr = "127.0.0.1:6379"
 	}
-	return &Store{redis.NewUniversalClient(&redis.UniversalOptions{Addrs: strings.Split(addr, ","), ContextTimeoutEnabled: true, MaxRetries: -1})}
+	return newStore(redis.NewUniversalClient(&redis.UniversalOptions{Addrs: strings.Split(addr, ","), ContextTimeoutEnabled: true, MaxRetries: -1}))
 }
 func (s *Store) Close() error                   { return s.r.Close() }
 func (s *Store) Ping(ctx context.Context) error { return s.r.Ping(ctx).Err() }
@@ -35,3 +38,7 @@ func (s *Store) Mute(ctx context.Context, room string, uid uint64, ttl time.Dura
 	return s.r.Set(ctx, fmt.Sprintf("dm:{%s}:mute:%d", room, uid), 1, ttl).Err()
 }
 func (s *Store) Mux(ctx context.Context, n int) *Mux { return NewMux(ctx, s.r, n) }
+
+func newStore(r redis.UniversalClient) *Store {
+	return &Store{r, redis.NewScript(appendEventLua), redis.NewScript(acceptEventLua), redis.NewScript(allowActionLua)}
+}

@@ -1,5 +1,5 @@
 // Repository/DAO,Data access object
-package repo
+package store
 
 import (
 	"context"
