@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/gorilla/websocket"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 type observer struct {
@@ -35,7 +35,7 @@ type observer struct {
 func dial(addr, room string, id int, batch, browser bool) *websocket.Conn {
 	dialer := *websocket.DefaultDialer
 	if batch {
-		dialer.Subprotocols = []string{model.BatchProtocol}
+		dialer.Subprotocols = []string{protocol.BatchProtocol}
 	}
 	path := fmt.Sprintf("/ws?room=%s&uid=%d", room, id)
 	headers := http.Header{}
@@ -65,8 +65,8 @@ func dial(addr, room string, id int, batch, browser bool) *websocket.Conn {
 	}
 	if browser {
 		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		var ready model.WsPacket
-		if err := conn.ReadJSON(&ready); err != nil || ready.Type != 106 {
+		var ready protocol.WsPacket
+		if err := conn.ReadJSON(&ready); err != nil || ready.Type != protocol.TypeReady {
 			log.Fatalf("subscription failed: %v", err)
 		}
 		conn.SetReadDeadline(time.Time{})
@@ -104,13 +104,13 @@ func connect(addr, room string, id, expected int, batch, sample, browser bool, r
 				return
 			}
 			now := time.Now().UnixMicro()
-			packets, err := model.DecodePackets(data)
+			packets, err := protocol.DecodePackets(data)
 			if err != nil {
 				log.Fatal(err)
 			}
 			n := 0
 			for _, p := range packets {
-				if p.Type != model.TypeDanmaku {
+				if p.Type != protocol.TypeDanmaku {
 					continue
 				}
 				if p.RoomID != expectedRoom {

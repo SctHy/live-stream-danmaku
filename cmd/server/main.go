@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/api"
-	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/repo"
-	"github.com/charlesAcmen/livestream-danmaku/internal/ws"
 	"github.com/gin-gonic/gin"
+	"github.com/scthy/live-stream-danmaku/internal/api"
+	"github.com/scthy/live-stream-danmaku/internal/infra"
+	"github.com/scthy/live-stream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/repo"
+	"github.com/scthy/live-stream-danmaku/internal/ws"
 	"go.uber.org/zap"
 )
 
@@ -29,7 +29,6 @@ func main() {
 	window := flag.Duration("batch-window", 5*time.Millisecond, "maximum hot-room coalescing delay")
 	gap := flag.Duration("batch-arrival-gap", ws.DefaultBatchArrivalGap, "maximum interval between arrivals to start a batch")
 	minViewers := flag.Int("batch-min-viewers", 128, "minimum batch-capable viewers")
-	prepared := flag.Bool("prepared", false, "share prepared frames")
 	shards := flag.Int("room-shards", ws.RoomShards, "number of room workers")
 	migrationTimeout := flag.Duration("migration-timeout", 30*time.Second, "maximum time for rolling handoff (zero closes immediately)")
 	migrationBatch := flag.Int("migration-batch", 100, "maximum handoff invitations per 100ms")
@@ -44,7 +43,6 @@ func main() {
 	m.BatchWindow = *window
 	m.BatchArrivalGap = *gap
 	m.MinBatchViewers = *minViewers
-	m.Prepared = *prepared
 	go m.Start()
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()

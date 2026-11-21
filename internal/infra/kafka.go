@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/logger"
 	"go.uber.org/zap"
 )
 

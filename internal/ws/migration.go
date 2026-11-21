@@ -2,6 +2,8 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"time"
 )
 
@@ -53,6 +55,9 @@ func (m *Manager) Migrate(ctx context.Context, batch, limit int, interval time.D
 	}
 }
 
-var migrationNotice = &outboundFrame{payload: []byte(`{"type":107,"data":{}}`), count: 1}
+func migrationNotice() *outboundFrame {
+	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeMigrate, Data: json.RawMessage(`{}`)})
+	return &outboundFrame{payload: wire, count: 1}
+}
 
 func (m *Manager) Retiring() bool { return m.retiring.Load() }

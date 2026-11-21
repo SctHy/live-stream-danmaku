@@ -28,7 +28,7 @@ func InitLogger(env string) {
 		config.EncoderConfig.TimeKey = ""
 		// Remove caller info (file:line)
 		// Setting CallerKey to empty string hides the source file path.
-		config.EncoderConfig.CallerKey = "" 
+		config.EncoderConfig.CallerKey = ""
 	}
 
 	var err error

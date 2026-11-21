@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 // Keep the recovery cursor and live publish in one Redis operation across gateways.
@@ -51,7 +51,7 @@ redis.call('SET',KEYS[3],ARGV[3],'EX',600)
 return {'accepted',ARGV[3]}
 `)
 
-func AcceptDanmaku(ctx context.Context, r *redis.Client, msg model.DanmakuMessage, payload []byte) (string, string, error) {
+func AcceptDanmaku(ctx context.Context, r *redis.Client, msg protocol.DanmakuMessage, payload []byte) (string, string, error) {
 	user := fmt.Sprintf("%s:%d", msg.RoomID, msg.UserID)
 	request := msg.ClientMsgID
 	if request == "" {
@@ -62,7 +62,7 @@ func AcceptDanmaku(ctx context.Context, r *redis.Client, msg model.DanmakuMessag
 		fmt.Sprintf(KeyRoomPubSub, msg.RoomID),
 		"dm:send:" + user + ":" + request,
 		"dm:mute:" + user,
-		fmt.Sprintf("dm:rate:%s:%d", user, model.TypeDanmaku),
+		fmt.Sprintf("dm:rate:%s:%d", user, protocol.TypeDanmaku),
 		archiveStream,
 	}
 	result, err := acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID).StringSlice()
@@ -73,14 +73,14 @@ func AcceptDanmaku(ctx context.Context, r *redis.Client, msg model.DanmakuMessag
 }
 
 type Recovery struct {
-	Events   []model.WsPacket `json:"events"`
-	Position string           `json:"pos"`
-	Reset    bool             `json:"reset"`
+	Events   []protocol.WsPacket `json:"events"`
+	Position string              `json:"pos"`
+	Reset    bool                `json:"reset"`
 }
 
 func Recover(ctx context.Context, r *redis.Client, room, after string) (Recovery, error) {
 	entries, err := r.XRange(ctx, "dm:recent:"+room, "-", "+").Result()
-	out := Recovery{Events: []model.WsPacket{}, Position: "0-0", Reset: after != "" && after != "0-0"}
+	out := Recovery{Events: []protocol.WsPacket{}, Position: "0-0", Reset: after != "" && after != "0-0"}
 	if err != nil {
 		return out, err
 	}
@@ -89,7 +89,7 @@ func Recover(ctx context.Context, r *redis.Client, room, after string) (Recovery
 		if i == 0 && after == "0-0" && entry.Values["prev"] != "0-0" {
 			out.Reset = true
 		}
-		var packet model.WsPacket
+		var packet protocol.WsPacket
 		raw, ok := entry.Values["packet"].(string)
 		if !ok {
 			return out, fmt.Errorf("missing journal payload")
@@ -101,7 +101,7 @@ func Recover(ctx context.Context, r *redis.Client, room, after string) (Recovery
 		packet.Previous = out.Position
 		out.Position = packet.Position
 		out.Events = append(out.Events, packet)
-		if packet.Type == 105 {
+		if packet.Type == protocol.TypeWithdraw {
 			var d struct {
 				EventID string `json:"event_id"`
 			}
@@ -120,7 +120,7 @@ func Recover(ctx context.Context, r *redis.Client, room, after string) (Recovery
 	if len(hidden) > 0 {
 		for i := range out.Events {
 			p := &out.Events[i]
-			if p.Type != model.TypeDanmaku {
+			if p.Type != protocol.TypeDanmaku {
 				continue
 			}
 			var ref struct {
@@ -130,7 +130,7 @@ func Recover(ctx context.Context, r *redis.Client, room, after string) (Recovery
 				return out, err
 			}
 			if hidden[ref.EventID] {
-				p.Type = 105
+				p.Type = protocol.TypeWithdraw
 				p.Data, _ = json.Marshal(ref)
 			}
 		}

@@ -10,9 +10,9 @@ import (
 	"os/signal" // handle signals
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/gorilla/websocket" // websocket library
+	"github.com/scthy/live-stream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +22,7 @@ func sendPacket(c *websocket.Conn, msgType int, data interface{}) {
 	dataBytes, _ := json.Marshal(data)
 
 	// 2. construct websocket packet
-	packet := model.WsPacket{
+	packet := protocol.WsPacket{
 		Type: msgType,
 		//json.RawMessage
 		Data: dataBytes,
@@ -68,7 +68,7 @@ func main() {
 	// Dial is like making a phone call, send a HTTP request with a header with upgrade:websocket
 	// returns a conn (connection object) when connected
 	dialer := *websocket.DefaultDialer
-	dialer.Subprotocols = []string{model.BatchProtocol}
+	dialer.Subprotocols = []string{protocol.BatchProtocol}
 	c, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		logger.Log.Fatal("[CLIENT]connecting failed", zap.Error(err))
@@ -87,7 +87,7 @@ func main() {
 			}
 
 			// 1. unwrap wsPacket
-			packets, err := model.DecodePackets(message)
+			packets, err := protocol.DecodePackets(message)
 			if err != nil {
 				continue
 			}
@@ -95,13 +95,13 @@ func main() {
 				// 2.unmarshal based on type
 				switch packet.Type {
 
-				case model.TypeDanmaku:
-					var danmaku model.DanmakuMessage
+				case protocol.TypeDanmaku:
+					var danmaku protocol.DanmakuMessage
 					json.Unmarshal(packet.Data, &danmaku)
 					logger.Log.Info("[Live Chat]", zap.String("content", danmaku.Content))
 
-				case model.TypeStats:
-					var stats model.StatsData
+				case protocol.TypeStats:
+					var stats protocol.StatsData
 					json.Unmarshal(packet.Data, &stats)
 					logger.Log.Info("[STATS]", zap.Int("Online", int(stats.Online)), zap.Int("Likes", int(stats.Likes)))
 				}
@@ -125,9 +125,9 @@ func main() {
 			//send raw danmaku text,the server will wrap it into JSON with userid etc
 			text := scanner.Text()
 			if text == "1" {
-				// ActionLike (103)
+				// TypeLike (103)
 				// data:empty
-				sendPacket(c, model.ActionLike, nil)
+				sendPacket(c, protocol.TypeLike, nil)
 				logger.Log.Info("已点赞 ❤️")
 
 			} else {
@@ -135,10 +135,10 @@ func main() {
 				// type:TypeDanmaku (101)
 				// notice：client only needs to fill in Content，other info including
 				// ID/Time is filled by server
-				msg := model.DanmakuMessage{
+				msg := protocol.DanmakuMessage{
 					Content: text,
 				}
-				sendPacket(c, model.TypeDanmaku, msg)
+				sendPacket(c, protocol.TypeDanmaku, msg)
 			}
 			// err := c.WriteMessage(websocket.TextMessage, []byte(text))
 			// if err != nil {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"os"
 	"testing"
 	"time"
@@ -26,7 +26,7 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 	publish := func(kind int, id string) {
 		t.Helper()
 		data, _ := json.Marshal(map[string]string{"content": "hello", "event_id": id})
-		packet, _ := json.Marshal(model.WsPacket{Type: kind, Data: data})
+		packet, _ := json.Marshal(protocol.WsPacket{Type: kind, Data: data})
 		if err := Journal(ctx, r, room, packet); err != nil {
 			t.Fatal(err)
 		}
@@ -42,9 +42,9 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 	publish(101, "first")
 	first := recoverFrom("").Position
 	publish(101, "second")
-	publish(105, "first")
+	publish(protocol.TypeWithdraw, "first")
 	all := recoverFrom("")
-	if len(all.Events) != 3 || all.Events[0].Type != 105 || string(all.Events[0].Data) != `{"event_id":"first"}` {
+	if len(all.Events) != 3 || all.Events[0].Type != protocol.TypeWithdraw || string(all.Events[0].Data) != `{"event_id":"first"}` {
 		t.Fatal(all)
 	}
 	missed := recoverFrom(first)

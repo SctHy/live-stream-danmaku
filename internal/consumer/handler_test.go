@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/IBM/sarama"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"testing"
 )
 
@@ -26,9 +26,11 @@ func (s *testSession) MarkMessage(m *sarama.ConsumerMessage, _ string) {
 	s.marked = append(s.marked, m.Offset)
 }
 
-type writeBatch func(context.Context, []*model.DanmakuMessage) error
+type writeBatch func(context.Context, []*protocol.DanmakuMessage) error
 
-func (f writeBatch) SaveBatch(ctx context.Context, b []*model.DanmakuMessage) error { return f(ctx, b) }
+func (f writeBatch) SaveBatch(ctx context.Context, b []*protocol.DanmakuMessage) error {
+	return f(ctx, b)
+}
 
 func TestClaimReplaysUnconfirmedBatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -41,7 +43,7 @@ func TestClaimReplaysUnconfirmedBatch(t *testing.T) {
 		close(records)
 		return testClaim{records: records}
 	}
-	store := writeBatch(func(context.Context, []*model.DanmakuMessage) error {
+	store := writeBatch(func(context.Context, []*protocol.DanmakuMessage) error {
 		cancel()
 		return errors.New("connection lost before acknowledgement")
 	})
@@ -50,7 +52,7 @@ func TestClaimReplaysUnconfirmedBatch(t *testing.T) {
 		t.Fatalf("err=%v marked=%v", err, session.marked)
 	}
 	session.ctx = context.Background()
-	store = func(_ context.Context, batch []*model.DanmakuMessage) error {
+	store = func(_ context.Context, batch []*protocol.DanmakuMessage) error {
 		if len(batch) != 2 || batch[0].EventID != "kafka:history:1:10" || batch[1].EventID != "stable" {
 			t.Fatalf("unexpected replay: %v", batch)
 		}

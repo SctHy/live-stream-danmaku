@@ -10,14 +10,14 @@ import (
 )
 
 func TestMixedFanoutAndBudget(t *testing.T) {
-	m := Manager{Prepared: true}
+	m := Manager{}
 	legacy := &Client{Send: make(chan *outboundFrame, 3)}
 	a := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
 	b := &Client{batch: true, Send: make(chan *outboundFrame, 1)}
 	job := &BroadcastJob{Clients: []*Client{legacy, a, b}, Packets: [][]byte{[]byte(`{"n":1}`), []byte(`{"n":2}`)}}
 	m.deliver(job)
 	frame := <-a.Send
-	if frame != <-b.Send || frame.prepared == nil || string(frame.payload) != `[{"n":1},{"n":2}]` || frame.count != 2 {
+	if frame != <-b.Send || string(frame.payload) != `[{"n":1},{"n":2}]` || frame.count != 2 {
 		t.Fatal("batch not shared or out of order")
 	}
 	for _, p := range job.Packets {

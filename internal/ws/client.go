@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model" //database structures
 	"github.com/gorilla/websocket"
+	"github.com/scthy/live-stream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/protocol" //database structures
 	"go.uber.org/zap"
 )
 
@@ -41,7 +41,7 @@ func (m *Manager) NewClient(uid uint64, name, room string, conn *websocket.Conn)
 	return &Client{
 		registered: make(chan struct{}),
 		stats:      make(chan *outboundFrame, 1),
-		batch:      conn != nil && conn.Subprotocol() == model.BatchProtocol,
+		batch:      conn != nil && conn.Subprotocol() == protocol.BatchProtocol,
 		UserID:     uid,
 		Username:   name,
 		RoomID:     room,
@@ -80,7 +80,7 @@ func (c *Client) ReadPump(manager *Manager) {
 		}
 
 		// 2. Parse the Envelope (WsPacket)
-		var packet model.WsPacket
+		var packet protocol.WsPacket
 		if err := json.Unmarshal(messageBytes, &packet); err != nil {
 			logger.Log.Error("[CLIENT]Invalid JSON format", zap.Uint64("uid", c.UserID))
 			continue
@@ -108,16 +108,11 @@ func (c *Client) WritePump() {
 		case message = <-c.Send:
 			chat = true
 		case <-c.migration:
-			message = migrationNotice
+			message = migrationNotice()
 		case message = <-c.stats:
 		}
 		c.Socket.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		var err error
-		if message.prepared != nil {
-			err = c.Socket.WritePreparedMessage(message.prepared)
-		} else {
-			err = c.Socket.WriteMessage(websocket.TextMessage, message.payload)
-		}
+		err := c.Socket.WriteMessage(websocket.TextMessage, message.payload)
 		if chat {
 			c.pendingBytes.Add(-int64(len(message.payload)))
 		}

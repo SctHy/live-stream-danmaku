@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time" //broadcast stats data timer
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/live-stream-danmaku/internal/infra"
+	"github.com/scthy/live-stream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +42,7 @@ type Manager struct {
 	// Unregister channel: when a client disconnects, send the client pointer to the channel
 	Unregister chan *Client
 
-	publishQueues   []chan *model.WsPacket
+	publishQueues   []chan *protocol.WsPacket
 	shardSeed       maphash.Seed
 	ingress         sync.RWMutex
 	draining        bool
@@ -53,7 +53,6 @@ type Manager struct {
 	BatchWindow     time.Duration
 	MinBatchViewers int
 	BatchArrivalGap time.Duration
-	Prepared        bool
 	dropped         atomic.Uint64
 	shardDrops      atomic.Uint64
 	clientDrops     atomic.Uint64
@@ -120,7 +119,7 @@ func NewManager(sendCapacity, shards int) *Manager {
 		ready:          make(map[string]chan struct{}),
 		cancelSub:      make(map[string]context.CancelFunc),
 		snapshots:      make(map[string][]*Client),
-		publishQueues:  make([]chan *model.WsPacket, shards),
+		publishQueues:  make([]chan *protocol.WsPacket, shards),
 		deliveryQueues: make([]chan *BroadcastJob, shards),
 		sendCapacity:   sendCapacity,
 		historyQueue:   make(chan []byte, infra.ProducerChanBufSize),
@@ -131,7 +130,7 @@ func NewManager(sendCapacity, shards int) *Manager {
 		BatchArrivalGap: DefaultBatchArrivalGap,
 	}
 	for i := range shards {
-		m.publishQueues[i] = make(chan *model.WsPacket, BroadcastChanSize/shards)
+		m.publishQueues[i] = make(chan *protocol.WsPacket, BroadcastChanSize/shards)
 		m.deliveryQueues[i] = make(chan *BroadcastJob, (BroadcastJobChanSize+shards-1)/shards)
 	}
 	return m
@@ -188,7 +187,7 @@ func (m *Manager) roomShard(room string) int {
 	return int(maphash.String(m.shardSeed, room) % uint64(len(m.deliveryQueues)))
 }
 
-func (m *Manager) enqueue(packet *model.WsPacket, closed <-chan struct{}) bool {
+func (m *Manager) enqueue(packet *protocol.WsPacket, closed <-chan struct{}) bool {
 	m.ingress.RLock()
 	defer m.ingress.RUnlock()
 	if m.draining {
@@ -292,7 +291,7 @@ func (m *Manager) handleUnregister(client *Client) {
 		}
 	}
 }
-func (m *Manager) handleBroadcast(packet *model.WsPacket) {
+func (m *Manager) handleBroadcast(packet *protocol.WsPacket) {
 	// Serialize the envelope for distribution
 	payload, err := json.Marshal(packet)
 	if err != nil {
@@ -350,7 +349,7 @@ func (m *Manager) broadcastStats() {
 		}
 		for room, s := range stats {
 			data, _ := json.Marshal(s)
-			wire, _ := json.Marshal(model.WsPacket{Type: model.TypeStats, RoomID: room, Data: data})
+			wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeStats, RoomID: room, Data: data})
 			frame := m.frame(wire, 1)
 			for _, client := range m.roomSnapshot(room) {
 				client.setStats(frame)

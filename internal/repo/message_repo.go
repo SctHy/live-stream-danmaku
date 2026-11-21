@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,7 +23,7 @@ func NewMessageRepo(db *pgxpool.Pool) *MessageRepo {
 
 // SaveBatch inserts one partition batch atomically. The PostgreSQL driver encodes
 // arrays as five bind parameters regardless of batch size.
-func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*model.DanmakuMessage) error {
+func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMessage) error {
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -51,7 +51,7 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*model.DanmakuMessag
 }
 
 // Playback pages through a half-open media interval. The row id breaks ties at the same millisecond.
-func (r *MessageRepo) Playback(ctx context.Context, room string, from, until, after int64) ([]model.DanmakuMessage, error) {
+func (r *MessageRepo) Playback(ctx context.Context, room string, from, until, after int64) ([]protocol.DanmakuMessage, error) {
 	rows, err := r.db.Query(ctx, `SELECT id,event_id,content,video_offset_ms,user_id::text,send_time FROM danmaku_messages m
  WHERE room_id=$1 AND (video_offset_ms,id)>($2,$3) AND video_offset_ms<$4
  AND NOT EXISTS (SELECT 1 FROM danmaku_withdrawals w WHERE w.room_id=m.room_id AND w.event_id=m.event_id)
@@ -60,9 +60,9 @@ func (r *MessageRepo) Playback(ctx context.Context, room string, from, until, af
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]model.DanmakuMessage, 0)
+	out := make([]protocol.DanmakuMessage, 0)
 	for rows.Next() {
-		m := model.DanmakuMessage{RoomID: room}
+		m := protocol.DanmakuMessage{RoomID: room}
 		var uid string
 		if err := rows.Scan(&m.ID, &m.EventID, &m.Content, &m.VideoOffsetMS, &uid, &m.SendTime); err != nil {
 			return nil, err

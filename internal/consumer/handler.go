@@ -7,15 +7,15 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
+	"github.com/scthy/live-stream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"go.uber.org/zap"
 )
 
 const FlushInterval = 2 * time.Second
 
 type batchStore interface {
-	SaveBatch(context.Context, []*model.DanmakuMessage) error
+	SaveBatch(context.Context, []*protocol.DanmakuMessage) error
 }
 
 type DanmakuHandler struct {
@@ -34,7 +34,7 @@ func (*DanmakuHandler) Cleanup(sarama.ConsumerGroupSession) error { return nil }
 // valid records in this partition are durable.
 func (h *DanmakuHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	ctx := session.Context()
-	batch := make([]*model.DanmakuMessage, 0, h.batchSize)
+	batch := make([]*protocol.DanmakuMessage, 0, h.batchSize)
 	var last *sarama.ConsumerMessage
 	flush := func() error {
 		if last == nil {
@@ -75,9 +75,9 @@ func (h *DanmakuHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 				return flush()
 			}
 			last = msg
-			var p model.WsPacket
-			var d model.DanmakuMessage
-			if err := json.Unmarshal(msg.Value, &p); err != nil || p.Type != model.TypeDanmaku || json.Unmarshal(p.Data, &d) != nil || !d.FitsHistory() {
+			var p protocol.WsPacket
+			var d protocol.DanmakuMessage
+			if err := json.Unmarshal(msg.Value, &p); err != nil || p.Type != protocol.TypeDanmaku || json.Unmarshal(p.Data, &d) != nil || !d.FitsHistory() {
 				logger.Log.Warn("Skipping invalid history record", zap.Int32("partition", msg.Partition), zap.Int64("offset", msg.Offset))
 				continue
 			}

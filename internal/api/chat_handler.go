@@ -17,21 +17,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
-	"github.com/charlesAcmen/livestream-danmaku/internal/ws"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/live-stream-danmaku/internal/infra"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/live-stream-danmaku/internal/ws"
 )
 
 //go:embed web/*
 var assets embed.FS
 var slug = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,24}$`)
-var upgrader = websocket.Upgrader{Subprotocols: []string{model.BatchProtocol}}
+var upgrader = websocket.Upgrader{Subprotocols: []string{protocol.BatchProtocol}}
 
 type historyStore interface {
-	Playback(ctx context.Context, room string, from, until, after int64) ([]model.DanmakuMessage, error)
+	Playback(ctx context.Context, room string, from, until, after int64) ([]protocol.DanmakuMessage, error)
 	Withdraw(ctx context.Context, room, eventID string) error
 }
 
@@ -165,8 +165,8 @@ func (h *ChatHandler) connect(c *gin.Context, uid uint64, room string, session b
 	}
 	if session {
 		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		clock, _ := json.Marshal(map[string]int64{"server_time_ms": time.Now().UnixMilli()})
-		if err := conn.WriteJSON(model.WsPacket{Type: 106, Data: clock}); err != nil {
+		clock, _ := json.Marshal(protocol.ClockReady{ServerTimeMS: time.Now().UnixMilli()})
+		if err := conn.WriteJSON(protocol.WsPacket{Type: protocol.TypeReady, Data: clock}); err != nil {
 			client.Close()
 			h.manager.Leave(client)
 			return
@@ -234,8 +234,8 @@ func (h *ChatHandler) moderate(c *gin.Context) {
 		}
 		err = h.history.Withdraw(ctx, room, in.EventID)
 		if err == nil {
-			data, _ := json.Marshal(map[string]string{"event_id": in.EventID})
-			packet, _ := json.Marshal(model.WsPacket{Type: 105, RoomID: room, Data: data})
+			data, _ := json.Marshal(protocol.Withdraw{EventID: in.EventID})
+			packet, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeWithdraw, RoomID: room, Data: data})
 			err = infra.Journal(ctx, h.manager.RedisClient, room, packet)
 		}
 	default:

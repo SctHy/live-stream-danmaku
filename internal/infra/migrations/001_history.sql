@@ -1,13 +1,3 @@
-CREATE TABLE IF NOT EXISTS users (
-    id bigserial PRIMARY KEY,
-    username varchar(50) NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
-CREATE TABLE IF NOT EXISTS rooms (
-    id bigserial PRIMARY KEY,
-    room_number varchar(20) NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_room_number ON rooms(room_number);
 CREATE TABLE IF NOT EXISTS danmaku_messages (
     id bigserial PRIMARY KEY,
     room_id varchar(50) NOT NULL,

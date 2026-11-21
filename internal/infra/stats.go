@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 // SnapshotStats batches network round trips across rooms. Callers bound each chunk.
-func SnapshotStats(ctx context.Context, r *redis.Client, server string, rooms map[string]int, likes map[string]uint64, ttl time.Duration) (map[string]model.StatsData, error) {
+func SnapshotStats(ctx context.Context, r *redis.Client, server string, rooms map[string]int, likes map[string]uint64, ttl time.Duration) (map[string]protocol.StatsData, error) {
 	p := r.Pipeline()
 	owners := make(map[string]*redis.StringSliceCmd)
 	counts := make(map[string]*redis.StringCmd)
@@ -51,9 +51,9 @@ func SnapshotStats(ctx context.Context, r *redis.Client, server string, rooms ma
 	if _, err := p.Exec(ctx); err != nil {
 		return nil, err
 	}
-	out := make(map[string]model.StatsData, len(online))
+	out := make(map[string]protocol.StatsData, len(online))
 	for room, cmd := range online {
-		var s model.StatsData
+		var s protocol.StatsData
 		s.Likes, _ = counts[room].Uint64()
 		for i, v := range cmd.Val() {
 			if raw, ok := v.(string); ok {

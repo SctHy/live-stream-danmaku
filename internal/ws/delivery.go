@@ -3,11 +3,9 @@ package ws
 import (
 	"bytes"
 	"context"
+	"github.com/redis/go-redis/v9"
 	"sort"
 	"time"
-
-	"github.com/gorilla/websocket"
-	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -18,21 +16,12 @@ const (
 )
 
 type outboundFrame struct {
-	payload  []byte
-	prepared *websocket.PreparedMessage
-	count    int
+	payload []byte
+	count   int
 }
 
 func (m *Manager) frame(payload []byte, count int) *outboundFrame {
-	f := &outboundFrame{payload: payload, count: count}
-	if m.Prepared {
-		// Gorilla builds the uncompressed server representation entirely in memory.
-		p, err := websocket.NewPreparedMessage(websocket.TextMessage, payload)
-		if err == nil {
-			f.prepared = p
-		}
-	}
-	return f
+	return &outboundFrame{payload: payload, count: count}
 }
 
 func (m *Manager) deliver(job *BroadcastJob) {

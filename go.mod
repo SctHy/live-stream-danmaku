@@ -1,4 +1,4 @@
-module github.com/charlesAcmen/livestream-danmaku
+module github.com/scthy/live-stream-danmaku
 
 go 1.27.4
 

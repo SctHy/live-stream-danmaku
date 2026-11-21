@@ -23,12 +23,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/gorilla/websocket"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 var httpClient = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{MaxIdleConnsPerHost: 128, MaxConnsPerHost: 512}}
-var dialer = websocket.Dialer{Subprotocols: []string{model.BatchProtocol}, HandshakeTimeout: 10 * time.Second, NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+var dialer = websocket.Dialer{Subprotocols: []string{protocol.BatchProtocol}, HandshakeTimeout: 10 * time.Second, NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 	c, err := new(net.Dialer).DialContext(ctx, network, addr)
 	if err == nil {
 		c.(*net.TCPConn).SetLinger(0)
@@ -56,8 +56,8 @@ func (l *lab) connect(addr string) (*websocket.Conn, error) {
 		return nil, err
 	}
 	c.SetReadDeadline(time.Now().Add(30 * time.Second))
-	var p model.WsPacket
-	if err = c.ReadJSON(&p); err != nil || p.Type != 106 {
+	var p protocol.WsPacket
+	if err = c.ReadJSON(&p); err != nil || p.Type != protocol.TypeReady {
 		c.Close()
 		return nil, fmt.Errorf("welcome %v: %v", p.Type, err)
 	}
@@ -70,11 +70,11 @@ type viewer struct {
 	next   int
 }
 
-func (v *viewer) apply(p model.WsPacket) (time.Duration, error) {
+func (v *viewer) apply(p protocol.WsPacket) (time.Duration, error) {
 	if p.Previous != v.cursor && !(v.cursor == "" && p.Previous == "0-0") {
 		return 0, fmt.Errorf("cursor gap at %d", v.next)
 	}
-	var d model.DanmakuMessage
+	var d protocol.DanmakuMessage
 	if err := json.Unmarshal(p.Data, &d); err != nil {
 		return 0, err
 	}
@@ -95,12 +95,12 @@ func (l *lab) watch(c *websocket.Conn, onA bool) error {
 		_, frame, err := c.ReadMessage()
 		migrate := err != nil
 		if err == nil {
-			packets, e := model.DecodePackets(frame)
+			packets, e := protocol.DecodePackets(frame)
 			if e != nil {
 				return e
 			}
 			for _, p := range packets {
-				if p.Type == 107 {
+				if p.Type == protocol.TypeMigrate {
 					migrate = true
 					l.invited.Add(1)
 					continue
@@ -155,7 +155,7 @@ func (l *lab) watch(c *websocket.Conn, onA bool) error {
 
 // Recheck the guest identity and fetch the missing suffix through the same
 // HTTP endpoints as the browser. A failed attempt keeps its original cursor.
-func (l *lab) replace(cursor string, backoff bool) (*websocket.Conn, []model.WsPacket, error) {
+func (l *lab) replace(cursor string, backoff bool) (*websocket.Conn, []protocol.WsPacket, error) {
 	began := time.Now()
 	for attempt := 0; time.Since(began) < 30*time.Second; attempt++ {
 		if backoff || attempt > 0 {
@@ -194,7 +194,7 @@ func (l *lab) replace(cursor string, backoff bool) (*websocket.Conn, []model.WsP
 		}
 		var snapshot struct {
 			Reset  bool
-			Events []model.WsPacket
+			Events []protocol.WsPacket
 		}
 		err = json.NewDecoder(resp.Body).Decode(&snapshot)
 		resp.Body.Close()

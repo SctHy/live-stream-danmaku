@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
-	"github.com/charlesAcmen/livestream-danmaku/internal/repo"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/live-stream-danmaku/internal/repo"
 )
 
 // Every run gets its own schema, including its version ledger.
@@ -66,7 +66,7 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 				t.FailNow()
 			}
 			r := repo.NewMessageRepo(pool)
-			batch := []*model.DanmakuMessage{{EventID: "same", RoomID: "x", Content: "now", UserID: ^uint64(0), SendTime: time.Now()}}
+			batch := []*protocol.DanmakuMessage{{EventID: "same", RoomID: "x", Content: "now", UserID: ^uint64(0), SendTime: time.Now()}}
 			for range 2 {
 				if err := r.SaveBatch(ctx, batch); err != nil {
 					t.Fatal(err)
@@ -87,8 +87,8 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 						t.Fatal(err)
 					}
 				}
-				msg := &model.DanmakuMessage{RoomID: "x", EventID: id, SendTime: time.Now(), VideoOffsetMS: &offset}
-				if err := r.SaveBatch(ctx, []*model.DanmakuMessage{msg}); err != nil {
+				msg := &protocol.DanmakuMessage{RoomID: "x", EventID: id, SendTime: time.Now(), VideoOffsetMS: &offset}
+				if err := r.SaveBatch(ctx, []*protocol.DanmakuMessage{msg}); err != nil {
 					t.Fatal(err)
 				}
 			}

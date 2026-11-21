@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
 	"github.com/gorilla/websocket"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 // Point both URLs at gateways sharing a dedicated stack. Kafka can be stopped
@@ -37,8 +37,8 @@ func TestRetryAcrossGateways(t *testing.T) {
 			t.Fatal(err)
 		}
 		conn.SetReadDeadline(time.Now().Add(15 * time.Second))
-		var clock model.WsPacket
-		if err := conn.ReadJSON(&clock); err != nil || clock.Type != 106 {
+		var clock protocol.WsPacket
+		if err := conn.ReadJSON(&clock); err != nil || clock.Type != protocol.TypeReady {
 			t.Fatalf("clock %v: %v", clock, err)
 		}
 		return conn
@@ -71,7 +71,7 @@ func TestRetryAcrossGateways(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("first event count %d", len(events))
 	}
-	var original struct{ Data model.DanmakuMessage }
+	var original struct{ Data protocol.DanmakuMessage }
 	if err := json.Unmarshal(events[0], &original); err != nil || original.Data.EventID == "" {
 		t.Fatal("missing event id", err)
 	}
@@ -88,11 +88,11 @@ func TestRetryAcrossGateways(t *testing.T) {
 	}
 	for _, c := range clients {
 		for {
-			var packet model.WsPacket
+			var packet protocol.WsPacket
 			if err := c.ReadJSON(&packet); err != nil {
 				t.Fatal(err)
 			}
-			if packet.Type != 104 {
+			if packet.Type != protocol.TypeReceipt {
 				continue
 			}
 			var receipt struct {
@@ -113,7 +113,7 @@ func TestRetryAcrossGateways(t *testing.T) {
 	for time.Now().Before(until) {
 		rows := read("/playback?from=0&until=100")
 		if len(rows) > 0 {
-			var row model.DanmakuMessage
+			var row protocol.DanmakuMessage
 			if len(rows) != 1 || json.Unmarshal(rows[0], &row) != nil || row.EventID != original.Data.EventID {
 				t.Fatal("unexpected archive", rows)
 			}

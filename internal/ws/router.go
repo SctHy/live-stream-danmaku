@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
+	"github.com/scthy/live-stream-danmaku/internal/infra"
+	"github.com/scthy/live-stream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"go.uber.org/zap"
 )
 
@@ -20,8 +20,8 @@ func (m *Manager) receipt(c *Client, id, status, eventID string) {
 	if !c.Session {
 		return
 	}
-	data, _ := json.Marshal(map[string]string{"client_msg_id": id, "status": status, "event_id": eventID})
-	wire, _ := json.Marshal(model.WsPacket{Type: 104, Data: data})
+	data, _ := json.Marshal(protocol.Receipt{ClientMsgID: id, Status: status, EventID: eventID})
+	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeReceipt, Data: data})
 	m.safeSend(c, m.frame(wire, 1))
 }
 
@@ -42,11 +42,11 @@ func (m *Manager) permitted(c *Client, action int, id string) bool {
 	return true
 }
 
-func (m *Manager) dispatch(c *Client, packet model.WsPacket) {
+func (m *Manager) dispatch(c *Client, packet protocol.WsPacket) {
 	switch packet.Type {
-	case model.TypeDanmaku:
+	case protocol.TypeDanmaku:
 		m.handleDanmaku(c, packet.Data)
-	case model.ActionLike:
+	case protocol.TypeLike:
 		m.handleLike(c, packet.Data)
 	default:
 		logger.Log.Warn("Unknown WebSocket message type", zap.Int("type", packet.Type))
@@ -54,16 +54,16 @@ func (m *Manager) dispatch(c *Client, packet model.WsPacket) {
 }
 
 func (m *Manager) handleDanmaku(c *Client, data []byte) {
-	var input model.DanmakuMessage
+	var input protocol.DanmakuMessage
 	if json.Unmarshal(data, &input) != nil || !input.FitsHistory() ||
 		strings.TrimSpace(input.Content) == "" || len(input.ClientMsgID) > 80 ||
 		(input.VideoOffsetMS != nil && (*input.VideoOffsetMS < 0 || *input.VideoOffsetMS >= 86400000)) {
 		m.reply(c, input.ClientMsgID, "invalid")
 		return
 	}
-	msg := model.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), VideoOffsetMS: input.VideoOffsetMS, ClientMsgID: input.ClientMsgID}
+	msg := protocol.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), VideoOffsetMS: input.VideoOffsetMS, ClientMsgID: input.ClientMsgID}
 	body, _ := json.Marshal(msg)
-	packet := &model.WsPacket{Type: model.TypeDanmaku, RoomID: c.RoomID, Data: body}
+	packet := &protocol.WsPacket{Type: protocol.TypeDanmaku, RoomID: c.RoomID, Data: body}
 	if c.Session {
 		ctx, cancel := context.WithTimeout(context.Background(), infra.RedisCancelTimeout)
 		defer cancel()
@@ -83,12 +83,12 @@ func (m *Manager) handleDanmaku(c *Client, data []byte) {
 }
 
 func (m *Manager) handleLike(c *Client, data []byte) {
-	var like model.Like
+	var like protocol.Like
 	if json.Unmarshal(data, &like) != nil || like.Count == 0 || like.Count > 20 {
 		m.reply(c, "", "invalid")
 		return
 	}
-	if !m.permitted(c, model.ActionLike, "") {
+	if !m.permitted(c, protocol.TypeLike, "") {
 		return
 	}
 	m.likesMu.Lock()

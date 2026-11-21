@@ -1,4 +1,4 @@
-package model
+package protocol
 
 import (
 	"encoding/json" //Delayed Parsing
@@ -7,23 +7,15 @@ import (
 	"unicode/utf8"
 )
 
-// ==========================================
-// Part 1: Protocol Constants
-// ==========================================
-
-// Define message types
 const (
-	// TypeDanmu: Standard chat message
-	TypeDanmaku = 101
-	// TypeStats: Room statistics (Online count, Likes)
-	TypeStats = 102
-	// ActionLike: User sends a "Like" signal (Client -> Server)
-	ActionLike = 103
+	TypeDanmaku  = 101
+	TypeStats    = 102
+	TypeLike     = 103
+	TypeReceipt  = 104
+	TypeWithdraw = 105
+	TypeReady    = 106
+	TypeMigrate  = 107
 )
-
-// ==========================================
-// Part 2: The Envelope
-// ==========================================
 
 // WsPacket is the standard wrapper for ALL websocket communications.
 // Every message sent or received must follow this structure.
@@ -37,10 +29,6 @@ type WsPacket struct {
 	// type RawMessage []byte,rather than map[int]interface{} using Assert
 	Data json.RawMessage `json:"data"`
 }
-
-// ==========================================
-// Part 3: The Payloads
-// ==========================================
 
 // DanmakuMessage is a persisted event and the WebSocket chat payload.
 type DanmakuMessage struct {
@@ -67,8 +55,20 @@ type StatsData struct {
 	Likes    uint64 `json:"likes"`
 }
 
-// CmdLike: The content for ActionLike (Client -> Server)
+// CmdLike: The content for TypeLike (Client -> Server)
 // Currently empty, but extensible (e.g., send 10 likes at once).
 type Like struct {
 	Count uint64 `json:"count"`
+}
+
+type Receipt struct {
+	ClientMsgID string `json:"client_msg_id"`
+	Status      string `json:"status"`
+	EventID     string `json:"event_id"`
+}
+type Withdraw struct {
+	EventID string `json:"event_id"`
+}
+type ClockReady struct {
+	ServerTimeMS int64 `json:"server_time_ms"`
 }

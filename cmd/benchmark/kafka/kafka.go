@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/charlesAcmen/livestream-danmaku/internal/infra"
-	"github.com/charlesAcmen/livestream-danmaku/internal/logger"
-	"github.com/charlesAcmen/livestream-danmaku/internal/model"
+	"github.com/scthy/live-stream-danmaku/internal/infra"
+	"github.com/scthy/live-stream-danmaku/internal/logger"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"go.uber.org/zap"
 )
 
@@ -47,7 +47,7 @@ func main() {
 
 	// 3. Prepare Data
 	// Construct a standard packet
-	danmaku := model.DanmakuMessage{
+	danmaku := protocol.DanmakuMessage{
 		// ID is handled by AutoIncrement in DB, usually 0 here
 		RoomID:   "room_benchmark_1",
 		UserID:   12345, // Mock User ID
@@ -60,8 +60,8 @@ func main() {
 		logger.Log.Fatal("[BENCHMARK] Failed to marshal danmaku", zap.Error(err))
 	}
 
-	packet := model.WsPacket{
-		Type:   model.TypeDanmaku,
+	packet := protocol.WsPacket{
+		Type:   protocol.TypeDanmaku,
 		RoomID: "room_benchmark_1",
 		Data:   contentBytes,
 	}
