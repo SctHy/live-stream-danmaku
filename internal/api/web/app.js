@@ -113,19 +113,25 @@ async function json(url, options) {
   if (!r.ok) throw Error(String(r.status))
   return r.json()
 }
+let connecting = false
+let retryTimer
 async function connect() {
+  if (connecting) return
+  clearTimeout(retryTimer)
+  connecting = true
   try {
-    const sessionInfo = await json('/api/session', { method: 'POST' })
+    const sessionInfo = await json('/api/session', { method: 'POST', signal: AbortSignal.timeout(8000) })
     if (userID !== sessionInfo.user_id && pendingSend) {
       pendingSend = null
       feedback('身份已变更，上一条的结果请查看近期弹幕')
     }
     userID = sessionInfo.user_id
     const ws = new WebSocket(
-      location.origin.replace(/^http/, 'ws') + base + '/live',
+      location.origin.replace(/^http/, 'ws') + base + '/live?migrate=1',
       'danmaku.batch.v1',
     )
-    socket = ws
+    let promoted = false
+    const deadline = setTimeout(() => ws.close(), 10000)
     let pending = [],
       syncing = false
     async function sync() {
@@ -134,20 +140,51 @@ async function connect() {
       pending = []
       syncing = true
       try {
+        const after = cursor
         const res = await json(
-          base + '/recent?after=' + encodeURIComponent(cursor),
+          base + '/recent?after=' + encodeURIComponent(after),
+          { signal: AbortSignal.timeout(8000) },
         )
-        if (ws !== socket || ws.readyState !== WebSocket.OPEN) return
-        if (res.reset && live) {
-          clear()
-          feedback('离线时间超出恢复窗口，已载入近期弹幕')
+        if (ws.readyState !== WebSocket.OPEN || (promoted && socket !== ws)) return
+        // The old socket can advance the cursor while the snapshot is in flight.
+        // Apply only the suffix beyond that cursor, including across a stream reset.
+        let events = res.events
+        let reset = res.reset
+        let advance = true
+        if (cursor !== after) {
+          const index = events.findIndex((p) => p.pos === cursor)
+          if (index >= 0) {
+            events = events.slice(index + 1)
+            reset = false
+          } else if (cursor && older(res.pos, cursor)) {
+            advance = false
+          } else {
+            syncing = false
+            void sync()
+            return
+          }
         }
-        for (const p of res.events) apply(p, false)
-        cursor = res.pos
+        if (advance) {
+          if (reset && live) {
+            clear()
+            feedback('离线时间超出恢复窗口，已载入近期弹幕')
+          }
+          for (const p of events) apply(p, false)
+          cursor = res.pos
+        }
+        if (!promoted) {
+          const previous = socket
+          socket = ws
+          promoted = true
+          connecting = false
+          clearTimeout(deadline)
+          previous?.close()
+        }
         syncing = false
         const buffered = pending
         pending = []
         for (const p of buffered) ingest(p)
+        if (syncing || ws.readyState !== WebSocket.OPEN) return
         ready = true
         retries = 0
         controls()
@@ -171,13 +208,17 @@ async function connect() {
       apply(p, true)
     }
     ws.onmessage = ({ data }) => {
+      if (promoted && ws !== socket) return
       const parsed = JSON.parse(data)
       for (const p of Array.isArray(parsed) ? parsed : [parsed]) {
         if (p.type === 106) {
           clock = { server: p.data.server_time_ms, local: performance.now() }
           alignLiveClip()
           void sync()
-        } else if (p.type === 102) {
+        } else if (p.type === 107) {
+          if (promoted) void connect()
+          else ws.close()
+        } else if (p.type === 102 && promoted) {
           $('stats').textContent =
             '在线 ' + p.data.online + ' · 赞 ' + p.data.likes
           if (p.data.pos && cursor && !older(p.data.pos, cursor)) void sync()
@@ -204,20 +245,28 @@ async function connect() {
         } else if (p.pos) ingest(p)
       }
     }
-    ws.onclose = reconnect
+    ws.onclose = () => {
+      clearTimeout(deadline)
+      if (promoted && socket !== ws) return
+      if (!promoted) connecting = false
+      reconnect()
+    }
   } catch {
+    connecting = false
     reconnect()
   }
 }
 function reconnect() {
-  ready = false
-  if (pendingSend) feedback('连接中断，最后一条弹幕的发送结果待确认')
-  controls()
-  $('connection').textContent = '正在重连'
-  setTimeout(
-    connect,
-    Math.min(8000, 300 * 2 ** retries++) + Math.random() * 200,
-  )
+  if (!wsOpen()) {
+    ready = false
+    if (pendingSend) feedback('连接中断，最后一条弹幕的发送结果待确认')
+    controls()
+    $('connection').textContent = '正在重连'
+  }
+  if (connecting) return
+  clearTimeout(retryTimer)
+  const backoff = Math.min(8000, 300 * 2 ** retries++)
+  retryTimer = setTimeout(connect, backoff / 2 + Math.random() * backoff)
 }
 $('compose').onsubmit = (e) => {
   e.preventDefault()
