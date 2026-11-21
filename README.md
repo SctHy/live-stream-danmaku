@@ -116,6 +116,8 @@
 
 Kafka 地址可通过 `KAFKA_BROKERS` 配置，多个地址用逗号分隔。浏览器发言在同一场次、同一身份下用相同的 `client_msg_id` 重试，10 分钟内返回原事件 ID。Kafka 停机时待归档记录保存在 Redis，全局积压达到 65,536 条时拒绝新发言。用 `XLEN dm:archive:pending` 查看待转发量，用消费组 lag 查看 Kafka 中的积压。此保障依赖 Redis 保留数据。本机 CLI 和压测入口沿用网关内存历史队列。
 
+双网关滚动发布使用就绪探针摘流、分批通知及游标交接。部署参数和万人对照实验见[网关滚动下线](docs/gateway-migration.md)。
+
 ### 4. 🛡️ 广播优化
 
 客户端可协商 WebSocket 子协议 `danmaku.batch.v1`，收包时兼容单个对象和对象数组；仓库自带命令行客户端已支持。旧协议逐条投递。房间达到 128 位已协商观众（可调 `-batch-min-viewers`）后，间隔不超过 2 ms 的连续到达触发合批，默认最多等待 5 ms、32 条或 32 KiB，先到即发。稀疏消息直接发送。服务端参数 `-batch-window 0` 关闭合批，`-prepared=true` 开启跨连接共享预制帧。实测与故障语义见[广播与存储验证](docs/fanout-benchmarks.md)。
