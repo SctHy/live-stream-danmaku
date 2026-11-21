@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"github.com/IBM/sarama"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +69,21 @@ func TestClaimReplaysUnconfirmedBatch(t *testing.T) {
 	}
 	if len(session.marked) != 1 || session.marked[0] != 11 {
 		t.Fatal(session.marked)
+	}
+}
+
+func TestConstraintFailureIsolated(t *testing.T) {
+	var saved []string
+	store := writeBatch(func(ctx context.Context, b []*protocol.DanmakuMessage) error {
+		for _, r := range b {
+			if r.EventID == "bad" {
+				return &pgconn.PgError{Code: "23514"}
+			}
+		}
+		saved = append(saved, b[0].EventID)
+		return nil
+	})
+	if err := persist(context.Background(), store, []*protocol.DanmakuMessage{{EventID: "first"}, {EventID: "bad"}, {EventID: "last"}}, slog.Default()); err != nil || strings.Join(saved, ",") != "first,last" {
+		t.Fatal(err, saved)
 	}
 }

@@ -32,7 +32,7 @@ func SnapshotStats(ctx context.Context, r *redis.Client, server string, rooms ma
 		owners[room] = p.SMembers(ctx, registry)
 		counts[room] = p.Get(ctx, key)
 		if strings.Contains(room, "/") {
-			tails[room] = p.XRevRangeN(ctx, "dm:recent:"+room, "+", "-", 1)
+			tails[room] = p.XRevRangeN(ctx, "dm:{"+room+"}:recent", "+", "-", 1)
 		}
 	}
 	if _, err := p.Exec(ctx); err != nil && err != redis.Nil {

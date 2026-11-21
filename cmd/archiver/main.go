@@ -51,10 +51,6 @@ func main() {
 		group, err = infra.InitKafkaConsumerGroup(brokers, KafkaGroupID)
 	}
 	defer group.Close()
-	relayDone := make(chan struct{})
-	go func() { defer close(relayDone); infra.ForwardArchive(ctx) }()
-	defer func() { cancel(); <-relayDone }()
-
 	// 7. start consuming
 	logger.Log.Info("[KAFKA CONSUMER]Ready to process messages")
 

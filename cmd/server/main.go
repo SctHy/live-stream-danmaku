@@ -33,13 +33,15 @@ func main() {
 	migrationTimeout := flag.Duration("migration-timeout", 30*time.Second, "maximum time for rolling handoff (zero closes immediately)")
 	migrationBatch := flag.Int("migration-batch", 100, "maximum handoff invitations per 100ms")
 	migrationLimit := flag.Int("migration-inflight", 64, "maximum outstanding handoffs (zero uses fixed rate)")
+	allowDev := flag.Bool("allow-dev-guest", false, "allow loopback benchmark identities")
+	muxShards := flag.Int("pubsub-shards", 8, "Redis subscription connections")
 	flag.Parse()
-	if *migrationTimeout < 0 || *migrationBatch < 1 || *migrationLimit < 0 || *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 || *gap < 0 {
+	if *muxShards < 1 || *migrationTimeout < 0 || *migrationBatch < 1 || *migrationLimit < 0 || *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 || *gap < 0 {
 		logger.Log.Fatal("invalid gateway configuration")
 	}
 	db := infra.InitDB()
 	defer db.Close()
-	m := ws.NewManager(*capacity, *shards)
+	m := ws.NewManager(*capacity, *shards, *muxShards)
 	m.BatchWindow = *window
 	m.BatchArrivalGap = *gap
 	m.MinBatchViewers = *minViewers
@@ -47,7 +49,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	api.NewChatHandler(repo.NewMessageRepo(db), m).Routes(r)
+	api.NewChatHandler(repo.NewMessageRepo(db), m, *allowDev).Routes(r)
 	r.GET("/livez", func(c *gin.Context) { c.Status(200) })
 	r.GET("/readyz", func(c *gin.Context) {
 		if m.Retiring() {

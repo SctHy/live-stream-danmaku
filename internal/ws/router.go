@@ -17,18 +17,12 @@ func (m *Manager) reply(c *Client, id, status string) {
 	m.receipt(c, id, status, "")
 }
 func (m *Manager) receipt(c *Client, id, status, eventID string) {
-	if !c.Session {
-		return
-	}
 	data, _ := json.Marshal(protocol.Receipt{ClientMsgID: id, Status: status, EventID: eventID})
 	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeReceipt, Data: data})
 	m.safeSend(c, m.frame(wire, 1))
 }
 
 func (m *Manager) permitted(c *Client, action int, id string) bool {
-	if !c.Session {
-		return true
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	status, err := infra.Policy(ctx, m.RedisClient, c.RoomID, c.UserID, action)
@@ -64,7 +58,13 @@ func (m *Manager) handleDanmaku(c *Client, data []byte) {
 	msg := protocol.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), VideoOffsetMS: input.VideoOffsetMS, ClientMsgID: input.ClientMsgID}
 	body, _ := json.Marshal(msg)
 	packet := &protocol.WsPacket{Type: protocol.TypeDanmaku, RoomID: c.RoomID, Data: body}
-	if c.Session {
+	m.ingress.RLock()
+	defer m.ingress.RUnlock()
+	if m.draining {
+		m.reply(c, input.ClientMsgID, "unavailable")
+		return
+	}
+	{
 		ctx, cancel := context.WithTimeout(context.Background(), infra.RedisCancelTimeout)
 		defer cancel()
 		wire, _ := json.Marshal(packet)
@@ -72,13 +72,16 @@ func (m *Manager) handleDanmaku(c *Client, data []byte) {
 		if err != nil {
 			m.liveFailures.Add(1)
 		}
+		if status == "new" {
+			select {
+			case m.historyQueue <- wire:
+			default:
+				infra.HistoryQueueDrops.Add(1)
+			}
+			status = "accepted"
+		}
 		m.receipt(c, input.ClientMsgID, status, eventID)
 		return
-	}
-	if m.enqueue(packet, c.done) {
-		m.reply(c, input.ClientMsgID, "accepted")
-	} else {
-		m.reply(c, input.ClientMsgID, "overloaded")
 	}
 }
 

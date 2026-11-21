@@ -17,7 +17,6 @@ const (
 )
 
 type Client struct {
-	Session          bool
 	migration        chan struct{}
 	registered       chan struct{}
 	subscription     <-chan struct{}

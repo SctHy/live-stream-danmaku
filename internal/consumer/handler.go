@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -40,20 +41,8 @@ func (h *DanmakuHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim
 		if last == nil {
 			return nil
 		}
-		for len(batch) > 0 {
-			err := h.repo.SaveBatch(ctx, batch)
-			if err == nil {
-				break
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			logger.Log.Warn("History batch pending retry", zap.Error(err), zap.Int32("partition", last.Partition), zap.Int64("last_offset", last.Offset))
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Second):
-			}
+		if err := persist(ctx, h.repo, batch, slog.Default()); err != nil {
+			return err
 		}
 		session.MarkMessage(last, "")
 		batch = batch[:0]

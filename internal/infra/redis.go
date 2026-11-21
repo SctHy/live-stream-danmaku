@@ -16,11 +16,11 @@ import (
 const (
 	// Ensure Redis is running on localhost:6379 via Docker.
 	RedisAddr           = "127.0.0.1:6379"
-	KeyRoomPubSub       = "room:%s:pubsub"    // Channel for Redis Pub/Sub
-	KeyRoomLikes        = "room:%s:likes"     // Counter for likes
-	KeyRoomOnline       = "room:%s:online:*"  // Counter for online users of a room
-	KeyRoomServerOnline = "room:%s:online:%s" // Counter for online users of a server
-	KeyServerOfRoom     = "room:%s:servers"   // server lists for a specific room
+	KeyRoomPubSub       = "dm:{%s}:pubsub"    // Channel for Redis Pub/Sub
+	KeyRoomLikes        = "dm:{%s}:likes"     // Counter for likes
+	KeyRoomOnline       = "dm:{%s}:online:*"  // Counter for online users of a room
+	KeyRoomServerOnline = "dm:{%s}:online:%s" // Counter for online users of a server
+	KeyServerOfRoom     = "dm:{%s}:servers"   // server lists for a specific room
 	RedisCancelTimeout  = 2 * time.Second
 )
 

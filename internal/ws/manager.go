@@ -4,6 +4,7 @@ import (
 	"context" // context is used to manage the lifecycle of the Redis client
 	"encoding/json"
 	"fmt"
+	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 	"hash/maphash"
 	"math/rand"
 	"os"
@@ -42,7 +43,7 @@ type Manager struct {
 	// Unregister channel: when a client disconnects, send the client pointer to the channel
 	Unregister chan *Client
 
-	publishQueues   []chan *protocol.WsPacket
+	mux             *pubsub.Mux
 	shardSeed       maphash.Seed
 	ingress         sync.RWMutex
 	draining        bool
@@ -61,7 +62,7 @@ type Manager struct {
 	measuredJobs    atomic.Uint64
 	liveFailures    atomic.Uint64
 	statsRunning    atomic.Bool
-	ready           map[string]chan struct{}
+	ready           map[string]<-chan struct{}
 	historyQueue    chan []byte
 	publisher       *redis.Client
 
@@ -97,7 +98,7 @@ const (
 	RoomShards           = 32
 )
 
-func NewManager(sendCapacity, shards int) *Manager {
+func NewManager(sendCapacity, shards, muxShards int) *Manager {
 	// Generate a unique ID for this server instance.
 	// In k8s, you might use os.Hostname().
 	// Here we use Hostname + Random Int to ensure uniqueness during local restarts.
@@ -116,10 +117,10 @@ func NewManager(sendCapacity, shards int) *Manager {
 		Unregister:     make(chan *Client),
 		localLikes:     make(map[string]uint64),
 		Rooms:          make(map[string]map[*Client]struct{}),
-		ready:          make(map[string]chan struct{}),
+		ready:          make(map[string]<-chan struct{}),
 		cancelSub:      make(map[string]context.CancelFunc),
 		snapshots:      make(map[string][]*Client),
-		publishQueues:  make([]chan *protocol.WsPacket, shards),
+		mux:            pubsub.NewMux(life, rdb, muxShards),
 		deliveryQueues: make([]chan *BroadcastJob, shards),
 		sendCapacity:   sendCapacity,
 		historyQueue:   make(chan []byte, infra.ProducerChanBufSize),
@@ -130,7 +131,7 @@ func NewManager(sendCapacity, shards int) *Manager {
 		BatchArrivalGap: DefaultBatchArrivalGap,
 	}
 	for i := range shards {
-		m.publishQueues[i] = make(chan *protocol.WsPacket, BroadcastChanSize/shards)
+
 		m.deliveryQueues[i] = make(chan *BroadcastJob, (BroadcastJobChanSize+shards-1)/shards)
 	}
 	return m
@@ -171,45 +172,13 @@ func (m *Manager) Start() {
 
 // StartWorkers should be called inside Manager.Start()
 func (m *Manager) StartWorkers() {
-	for i, queue := range m.publishQueues {
-		m.publishWorkers.Add(1)
-		go func() {
-			defer m.publishWorkers.Done()
-			for packet := range queue {
-				m.handleBroadcast(packet)
-			}
-		}()
-		go m.broadcastWorker(m.deliveryQueues[i])
+	for _, q := range m.deliveryQueues {
+		go m.broadcastWorker(q)
 	}
 }
 
 func (m *Manager) roomShard(room string) int {
 	return int(maphash.String(m.shardSeed, room) % uint64(len(m.deliveryQueues)))
-}
-
-func (m *Manager) enqueue(packet *protocol.WsPacket, closed <-chan struct{}) bool {
-	m.ingress.RLock()
-	defer m.ingress.RUnlock()
-	if m.draining {
-		return false
-	}
-	queue := m.publishQueues[m.roomShard(packet.RoomID)]
-	select {
-	case queue <- packet:
-		return true
-	default:
-	}
-	timer := time.NewTimer(25 * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case queue <- packet:
-		return true
-	case <-closed:
-		return false
-	case <-timer.C:
-		m.rejected.Add(1)
-		return false
-	}
 }
 
 func (m *Manager) broadcastWorker(queue <-chan *BroadcastJob) {
@@ -251,9 +220,22 @@ func (m *Manager) handleRegister(client *Client) {
 		m.cancelSub[client.RoomID] = cancel
 		// 2. Start a background goroutine to listen to THIS room's Redis channel
 		// Pass context to subscriber
-		ready := make(chan struct{})
+		messages := make(chan *redis.Message, 256)
+		ready, err := m.mux.Subscribe(ctx, client.RoomID, func(data []byte) {
+			select {
+			case messages <- &redis.Message{Payload: string(data)}:
+			case <-ctx.Done():
+			}
+		})
+		if err != nil {
+			cancel()
+			delete(m.Rooms, client.RoomID)
+			delete(m.cancelSub, client.RoomID)
+			client.Close()
+			return
+		}
 		m.ready[client.RoomID] = ready
-		go m.subscribeToRoom(ctx, client.RoomID, ready)
+		go m.consumeRoom(ctx, client.RoomID, messages)
 		logger.Log.Info("[MANAGER] New room created on server", zap.String("room", client.RoomID))
 	}
 
@@ -282,7 +264,8 @@ func (m *Manager) handleUnregister(client *Client) {
 				delete(m.Rooms, client.RoomID)
 				delete(m.ready, client.RoomID)
 				if cancel, exists := m.cancelSub[client.RoomID]; exists {
-					cancel() // Signals subscribeToRoom to exit
+					cancel()
+					m.mux.Unsubscribe(m.life, client.RoomID)
 					delete(m.cancelSub, client.RoomID)
 					logger.Log.Info("[MANAGER] Room subscription stopped", zap.String("room", client.RoomID))
 				}
@@ -290,29 +273,6 @@ func (m *Manager) handleUnregister(client *Client) {
 
 		}
 	}
-}
-func (m *Manager) handleBroadcast(packet *protocol.WsPacket) {
-	// Serialize the envelope for distribution
-	payload, err := json.Marshal(packet)
-	if err != nil {
-		logger.Log.Error("[MANAGER] Marshal failed", zap.Error(err))
-		return
-	}
-
-	m.processDanmaku(packet.RoomID, payload)
-}
-
-// The history queue and live transport can fail independently.
-func (m *Manager) processDanmaku(roomID string, data []byte) {
-	// Async IO to Redis and Kafka
-
-	// 1. Persistence (Kafka)
-	select {
-	case m.historyQueue <- data:
-	default:
-		infra.HistoryQueueDrops.Add(1)
-	}
-	infra.PublishToRoom(m.publisher, roomID, data)
 }
 
 // broadcastStats fetches stats for ALL active rooms and sends updates locally.
@@ -366,28 +326,6 @@ func (m *Manager) broadcastStats() {
 	if len(chunk) > 0 {
 		flush()
 	}
-}
-
-// subscribeToRoom listens to a specific Redis channel for a room
-func (m *Manager) subscribeToRoom(ctx context.Context, roomID string, ready chan struct{}) {
-	channel := fmt.Sprintf(infra.KeyRoomPubSub, roomID)
-	for ctx.Err() == nil {
-		pubsub := m.RedisClient.Subscribe(ctx, channel)
-		if _, err := pubsub.ReceiveTimeout(ctx, 3*time.Second); err == nil {
-			if ready != nil {
-				close(ready)
-				ready = nil
-			}
-			m.consumeRoom(ctx, roomID, pubsub.Channel())
-		}
-		pubsub.Close()
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
-
 }
 
 // roomSnapshot reuses a read-only recipient list until the room membership changes.
@@ -505,13 +443,11 @@ func (m *Manager) Drain(ctx context.Context) error {
 	m.drainOnce.Do(func() {
 		m.ingress.Lock()
 		m.draining = true
-		for _, q := range m.publishQueues {
-			close(q)
-		}
+		close(m.historyQueue)
 		m.ingress.Unlock()
 		m.stop()
 		m.CloseClients()
-		go func() { m.publishWorkers.Wait(); close(m.historyQueue) }()
+		m.mux.Close()
 	})
 	select {
 	case <-m.historyDone:

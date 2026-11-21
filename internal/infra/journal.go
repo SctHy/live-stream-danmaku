@@ -23,47 +23,41 @@ if #tail>0 then
 end
 local id=epoch..'@'..redis.call('XADD',KEYS[1],'MAXLEN',256,'*','packet',ARGV[1],'prev',prev,'epoch',epoch)
 redis.call('EXPIRE',KEYS[1],120)
-local wire='{"pos":"'..id..'","prev":"'..prev..'",'..string.sub(ARGV[1],2)
+local wire='{"pos":"'..id..'","prev":"'..prev..'","packet":'..ARGV[1]..'}'
 redis.call('PUBLISH',KEYS[2],wire)
 `
 
 var appendEvent = redis.NewScript(journalLua + `return id`)
 
 func Journal(ctx context.Context, r *redis.Client, room string, payload []byte) error {
-	return appendEvent.Run(ctx, r, []string{"dm:recent:" + room, fmt.Sprintf(KeyRoomPubSub, room)}, string(payload), rand.Text()).Err()
+	return appendEvent.Run(ctx, r, []string{"dm:{" + room + "}:recent", fmt.Sprintf(KeyRoomPubSub, room)}, string(payload), rand.Text()).Err()
 }
-
-// Session sends append an archive obligation in the same operation as the live
-// event. Reject new messages before publishing when the archive backlog is full.
-const archiveStream = "dm:archive:pending"
 
 var acceptEvent = redis.NewScript(`
 local existing=redis.call('GET',KEYS[3])
 if existing then return {'accepted',existing} end
 if redis.call('EXISTS',KEYS[4])==1 then return {'muted',''} end
-if redis.call('XLEN',KEYS[6])>=65536 then return {'overloaded',''} end
 local n=redis.call('INCR',KEYS[5])
 if n==1 then redis.call('PEXPIRE',KEYS[5],1000) end
 if n>8 then return {'rate_limited',''} end
 ` + journalLua + `
-redis.call('XADD',KEYS[6],'*','packet',ARGV[1])
 redis.call('SET',KEYS[3],ARGV[3],'EX',600)
-return {'accepted',ARGV[3]}
+return {'new',ARGV[3]}
 `)
 
 func AcceptDanmaku(ctx context.Context, r *redis.Client, msg protocol.DanmakuMessage, payload []byte) (string, string, error) {
-	user := fmt.Sprintf("%s:%d", msg.RoomID, msg.UserID)
+	prefix := fmt.Sprintf("dm:{%s}:", msg.RoomID)
+	user := fmt.Sprint(msg.UserID)
 	request := msg.ClientMsgID
 	if request == "" {
 		request = msg.EventID
 	}
 	keys := []string{
-		"dm:recent:" + msg.RoomID,
+		"dm:{" + msg.RoomID + "}:recent",
 		fmt.Sprintf(KeyRoomPubSub, msg.RoomID),
-		"dm:send:" + user + ":" + request,
-		"dm:mute:" + user,
-		fmt.Sprintf("dm:rate:%s:%d", user, protocol.TypeDanmaku),
-		archiveStream,
+		prefix + "send:" + user + ":" + request,
+		prefix + "mute:" + user,
+		prefix + fmt.Sprintf("rate:%s:%d", user, protocol.TypeDanmaku),
 	}
 	result, err := acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID).StringSlice()
 	if err != nil {
@@ -79,7 +73,7 @@ type Recovery struct {
 }
 
 func Recover(ctx context.Context, r *redis.Client, room, after string) (Recovery, error) {
-	entries, err := r.XRange(ctx, "dm:recent:"+room, "-", "+").Result()
+	entries, err := r.XRange(ctx, "dm:{"+room+"}:recent", "-", "+").Result()
 	out := Recovery{Events: []protocol.WsPacket{}, Position: "0-0", Reset: after != "" && after != "0-0"}
 	if err != nil {
 		return out, err
@@ -153,6 +147,7 @@ if n>tonumber(ARGV[2]) then return 'rate_limited' end
 return 'ok'`)
 
 func Policy(ctx context.Context, r *redis.Client, room string, uid uint64, action int) (string, error) {
-	user := fmt.Sprintf("%s:%d", room, uid)
-	return allowAction.Run(ctx, r, []string{"dm:mute:" + user, fmt.Sprintf("dm:rate:%s:%d", user, action)}, time.Second.Milliseconds(), 8).Text()
+	prefix := fmt.Sprintf("dm:{%s}:", room)
+	user := fmt.Sprint(uid)
+	return allowAction.Run(ctx, r, []string{prefix + "mute:" + user, prefix + fmt.Sprintf("rate:%s:%d", user, action)}, time.Second.Milliseconds(), 8).Text()
 }

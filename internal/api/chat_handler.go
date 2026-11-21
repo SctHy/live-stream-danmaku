@@ -36,12 +36,13 @@ type historyStore interface {
 }
 
 type ChatHandler struct {
-	history historyStore
-	manager *ws.Manager
+	history  historyStore
+	manager  *ws.Manager
+	allowDev bool
 }
 
-func NewChatHandler(history historyStore, m *ws.Manager) *ChatHandler {
-	return &ChatHandler{history, m}
+func NewChatHandler(history historyStore, m *ws.Manager, allowDev bool) *ChatHandler {
+	return &ChatHandler{history, m, allowDev}
 }
 
 func (h *ChatHandler) Routes(r *gin.Engine) {
@@ -52,7 +53,7 @@ func (h *ChatHandler) Routes(r *gin.Engine) {
 		panic(err)
 	}
 	r.GET("/", func(c *gin.Context) { c.Data(200, "text/html; charset=utf-8", index) })
-	r.GET("/ws", h.ConnectWebSocket)
+
 	r.POST("/api/session", h.session)
 	room := r.Group("/api/rooms/:room/:session", func(c *gin.Context) {
 		a, b := c.Param("room"), c.Param("session")
@@ -116,28 +117,17 @@ func (h *ChatHandler) session(c *gin.Context) {
 }
 func (h *ChatHandler) live(c *gin.Context) {
 	uid, err := h.identity(c)
+	if err == redis.Nil && h.allowDev && loopback(c.Request.RemoteAddr) && c.GetHeader("Origin") == "" {
+		uid, err = strconv.ParseUint(c.Query("uid"), 10, 64)
+	}
 	if err != nil {
 		c.Status(401)
 		return
 	}
-	h.connect(c, uid, c.GetString("room"), true)
+	h.connect(c, uid, c.GetString("room"))
 }
 
-// The original CLI and load generator use a loopback-only, separate room namespace.
-func (h *ChatHandler) ConnectWebSocket(c *gin.Context) {
-	room := c.Query("room")
-	uid, err := strconv.ParseUint(c.Query("uid"), 10, 64)
-	if !loopback(c.Request.RemoteAddr) || c.GetHeader("Origin") != "" {
-		c.Status(403)
-		return
-	}
-	if err != nil || room == "" || strings.ContainsAny(room, "/\x00") || len(room) > 50 {
-		c.Status(400)
-		return
-	}
-	h.connect(c, uid, room, false)
-}
-func (h *ChatHandler) connect(c *gin.Context, uid uint64, room string, session bool) {
+func (h *ChatHandler) connect(c *gin.Context, uid uint64, room string) {
 	if h.manager.Retiring() {
 		c.Status(http.StatusServiceUnavailable)
 		return
@@ -147,8 +137,8 @@ func (h *ChatHandler) connect(c *gin.Context, uid uint64, room string, session b
 		return
 	}
 	client := h.manager.NewClient(uid, c.Query("name"), room, conn)
-	client.Session = session
-	if session && c.Query("migrate") == "1" {
+
+	if c.Query("migrate") == "1" {
 		client.EnableMigration()
 	}
 	if !h.manager.Join(c.Request.Context(), client) {
@@ -163,7 +153,7 @@ func (h *ChatHandler) connect(c *gin.Context, uid uint64, room string, session b
 		h.manager.Leave(client)
 		return
 	}
-	if session {
+	{
 		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		clock, _ := json.Marshal(protocol.ClockReady{ServerTimeMS: time.Now().UnixMilli()})
 		if err := conn.WriteJSON(protocol.WsPacket{Type: protocol.TypeReady, Data: clock}); err != nil {
@@ -226,7 +216,7 @@ func (h *ChatHandler) moderate(c *gin.Context) {
 			c.Status(400)
 			return
 		}
-		err = h.manager.RedisClient.Set(ctx, "dm:mute:"+room+":"+strconv.FormatUint(in.UserID, 10), 1, time.Duration(in.Seconds)*time.Second).Err()
+		err = h.manager.RedisClient.Set(ctx, "dm:{"+room+"}:mute:"+strconv.FormatUint(in.UserID, 10), 1, time.Duration(in.Seconds)*time.Second).Err()
 	case "withdraw":
 		if len(in.EventID) < 26 || len(in.EventID) > 80 {
 			c.Status(400)
