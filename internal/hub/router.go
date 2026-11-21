@@ -61,21 +61,20 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		m.reply(c, input.ClientMsgID, "unavailable")
 		return
 	}
-	{
-		ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
-		defer cancel()
-		wire, _ := json.Marshal(packet)
-		status, eventID, err := m.store.AcceptDanmaku(ctx, msg, wire)
-		if err != nil {
-			m.liveFailures.Add(1)
-		}
-		if status == "new" {
-			m.producer.Publish(c.RoomID, wire)
-			status = "accepted"
-		}
-		m.receipt(c, input.ClientMsgID, status, eventID)
-		return
+
+	ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
+	defer cancel()
+	wire, _ := json.Marshal(packet)
+	status, eventID, err := m.store.AcceptDanmaku(ctx, msg, wire)
+	if err != nil {
+		m.liveFailures.Add(1)
 	}
+	if status == "new" {
+		m.producer.Publish(c.RoomID, wire)
+		status = "accepted"
+	}
+	m.receipt(c, input.ClientMsgID, status, eventID)
+
 }
 
 func (m *Hub) handleLike(c *Client, data []byte) {

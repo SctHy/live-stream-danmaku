@@ -2,11 +2,12 @@ package mq
 
 import (
 	"context"
-	"github.com/twmb/franz-go/pkg/kgo"
 	"log/slog"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 const topic = "danmaku_save_topic"
@@ -18,7 +19,16 @@ type Producer struct {
 }
 
 func NewProducer(brokers []string, log *slog.Logger) (*Producer, error) {
-	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.AllowAutoTopicCreation(), kgo.DisableIdempotentWrite(), kgo.RequiredAcks(kgo.LeaderAck()), kgo.ProducerBatchCompression(kgo.SnappyCompression()), kgo.ProducerLinger(25*time.Millisecond), kgo.MaxBufferedRecords(16384), kgo.MaxBufferedBytes(32<<20))
+	cl, err := kgo.NewClient(
+		kgo.SeedBrokers(brokers...),
+		kgo.AllowAutoTopicCreation(),
+		kgo.DisableIdempotentWrite(),
+		kgo.RequiredAcks(kgo.LeaderAck()),
+		kgo.ProducerBatchCompression(kgo.SnappyCompression()),
+		kgo.ProducerLinger(25*time.Millisecond),
+		kgo.MaxBufferedRecords(16384),
+		kgo.MaxBufferedBytes(32<<20),
+	)
 	if err != nil {
 		return nil, err
 	}

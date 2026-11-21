@@ -1,4 +1,3 @@
-// Repository/DAO,Data access object
 package store
 
 import (
@@ -6,9 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
-
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 // MessageRepo handles database operations for danmaku messages.
@@ -22,7 +20,7 @@ func NewMessageRepo(db *pgxpool.Pool) *MessageRepo {
 }
 
 // SaveBatch inserts one partition batch atomically. The PostgreSQL driver encodes
-// arrays as five bind parameters regardless of batch size.
+// arrays as six bind parameters regardless of batch size.
 func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMessage) error {
 	if len(msgs) == 0 {
 		return nil

@@ -11,7 +11,7 @@ func BenchmarkConnectionAllocation(b *testing.B) {
 			m := Hub{sendCapacity: capacity}
 			b.ReportAllocs()
 			for b.Loop() {
-				c := m.NewClient(1, "user", "room", nil)
+				c := m.NewClient(1, "room", nil)
 				if cap(c.Send) != capacity {
 					b.Fatal("unexpected queue capacity")
 				}

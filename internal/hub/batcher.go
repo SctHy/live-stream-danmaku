@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -65,73 +66,72 @@ func (m *Hub) safeSend(c *Client, f *outboundFrame) {
 	}
 }
 
-// Only consecutive arrivals in a busy room start a batch. An idle room sends
-// its first packet immediately. Each job retains its original member snapshot.
-func (m *Hub) consumeRoom(ctx context.Context, room string, ch <-chan []byte) {
-	timer := time.NewTimer(time.Hour)
-	timer.Stop()
-	defer timer.Stop()
-	var deadline <-chan time.Time
-	var previous, expires time.Time
-	var pending *BroadcastJob
-	size := 0
-	flush := func() {
-		if pending != nil {
-			m.queueJob(room, pending)
-			pending = nil
-		}
-		deadline = nil
-		timer.Stop()
-		size = 0
+// The Redis shard calls push in wire order. Only a pending burst owns a timer.
+type roomBatch struct {
+	hub               *Hub
+	room              string
+	mu                sync.Mutex
+	previous, expires time.Time
+	pending           *BroadcastJob
+	timer             *time.Timer
+	size              int
+}
+
+func (b *roomBatch) flush() {
+	if b.pending != nil {
+		b.hub.queueJob(b.room, b.pending)
+		b.pending = nil
 	}
-	for {
-		select {
-		case <-ctx.Done():
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer = nil
+	}
+	b.size = 0
+}
+
+func (b *roomBatch) push(ctx context.Context, payload []byte) {
+	members := b.hub.roomSnapshot(b.room)
+	if ctx.Err() != nil || len(members) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	if !members[len(members)-1].batch {
+		split := sort.Search(len(members), func(i int) bool { return !members[i].batch })
+		b.hub.queueJob(b.room, &BroadcastJob{Clients: members[split:], Packets: [][]byte{payload}})
+		members = members[:split]
+		if len(members) == 0 {
+			b.flush()
 			return
-		case <-deadline:
-			flush()
-		case msg, ok := <-ch:
-			if !ok {
-				flush()
-				return
-			}
-			now := time.Now()
-			members := m.roomSnapshot(room)
-			if len(members) == 0 {
-				continue
-			}
-			payload := msg
-			if !members[len(members)-1].batch {
-				split := sort.Search(len(members), func(i int) bool { return !members[i].batch })
-				m.queueJob(room, &BroadcastJob{Clients: members[split:], Packets: [][]byte{payload}})
-				members = members[:split]
-				if len(members) == 0 {
-					flush()
-					continue
-				}
-			}
-			if pending != nil && (!now.Before(expires) || &pending.Clients[0] != &members[0] || size+len(payload)+1 > maxBatchBytes) {
-				flush()
-			}
-			hot := m.BatchArrivalGap > 0 && now.Sub(previous) <= m.BatchArrivalGap
-			previous = now
-			if pending == nil {
-				pending = &BroadcastJob{Clients: members}
-				if !hot || len(members) < m.MinBatchViewers || m.BatchWindow == 0 || len(payload)+2 >= maxBatchBytes {
-					pending.Packets = [][]byte{payload}
-					flush()
-					continue
-				}
-				expires = now.Add(m.BatchWindow)
-				deadline = timer.C
-				timer.Reset(m.BatchWindow)
-				size = 1
-			}
-			pending.Packets = append(pending.Packets, payload)
-			size += len(payload) + 1
-			if len(pending.Packets) >= maxBatchMessages || size >= maxBatchBytes {
-				flush()
-			}
 		}
+	}
+	if b.pending != nil && (!now.Before(b.expires) || &b.pending.Clients[0] != &members[0] || b.size+len(payload)+1 > maxBatchBytes) {
+		b.flush()
+	}
+	hot := now.Sub(b.previous) <= b.hub.BatchArrivalGap
+	b.previous = now
+	if b.pending == nil {
+		job := &BroadcastJob{Clients: members, Packets: [][]byte{payload}}
+		if !hot || len(members) < b.hub.MinBatchViewers || b.hub.BatchWindow == 0 || len(payload)+2 >= maxBatchBytes {
+			b.hub.queueJob(b.room, job)
+			return
+		}
+		b.pending = job
+		b.size = len(payload) + 2
+		b.expires = now.Add(b.hub.BatchWindow)
+		b.timer = time.AfterFunc(b.hub.BatchWindow, func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.pending == job {
+				b.flush()
+			}
+		})
+		return
+	}
+	b.pending.Packets = append(b.pending.Packets, payload)
+	b.size += len(payload) + 1
+	if len(b.pending.Packets) >= maxBatchMessages || b.size >= maxBatchBytes {
+		b.flush()
 	}
 }

@@ -99,7 +99,8 @@ button[aria-pressed='true'],
   border-radius: 12px;
   overflow: hidden;
 }
-video {
+[hidden] {display: none !important;}
+video, #clock {
   display: block;
   width: 100%;
   aspect-ratio: 16/9;

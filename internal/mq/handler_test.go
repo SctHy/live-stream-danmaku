@@ -2,13 +2,15 @@ package mq
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
-	"github.com/twmb/franz-go/pkg/kgo"
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 type writeBatch func(context.Context, []*protocol.DanmakuMessage) error
@@ -22,7 +24,11 @@ func TestClaimReplaysUnconfirmedBatch(t *testing.T) {
 	defer cancel()
 	var marked []int64
 	commit := func(ctx context.Context, rs ...*kgo.Record) error { marked = append(marked, rs[0].Offset); return nil }
-	records := []*kgo.Record{{Topic: "history", Partition: 1, Offset: 10, Value: []byte(`{"type":101,"data":{"content":"legacy"}}`)}, {Topic: "history", Partition: 1, Offset: 11, Value: []byte(`{"type":101,"data":{"event_id":"stable"}}`)}}
+	records := []*kgo.Record{
+		historyRecord(t, 10, protocol.DanmakuMessage{Content: "legacy"}),
+		historyRecord(t, 11, protocol.DanmakuMessage{EventID: "stable"}),
+	}
+
 	store := writeBatch(func(context.Context, []*protocol.DanmakuMessage) error {
 		cancel()
 		return errors.New("connection lost before acknowledgement")
@@ -60,7 +66,26 @@ func TestConstraintFailureIsolated(t *testing.T) {
 		saved = append(saved, b[0].EventID)
 		return nil
 	})
-	if err := persist(context.Background(), store, []*protocol.DanmakuMessage{{EventID: "first"}, {EventID: "bad"}, {EventID: "last"}}, slog.Default()); err != nil || strings.Join(saved, ",") != "first,last" {
-		t.Fatal(err, saved)
+	records := []*kgo.Record{
+		historyRecord(t, 10, protocol.DanmakuMessage{EventID: "first"}),
+		historyRecord(t, 11, protocol.DanmakuMessage{EventID: "bad"}),
+		historyRecord(t, 12, protocol.DanmakuMessage{EventID: "last"}),
 	}
+	var offset int64
+	err := archivePartition(context.Background(), store, slog.Default(), records, func(_ context.Context, rs ...*kgo.Record) error { offset = rs[0].Offset; return nil })
+	if err != nil || offset != 12 || strings.Join(saved, ",") != "first,last" {
+		t.Fatal(err, offset, saved)
+	}
+}
+func historyRecord(t *testing.T, offset int64, msg protocol.DanmakuMessage) *kgo.Record {
+	t.Helper()
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := json.Marshal(protocol.WsPacket{Type: protocol.TypeDanmaku, Data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &kgo.Record{Topic: "history", Partition: 1, Offset: offset, Value: packet}
 }

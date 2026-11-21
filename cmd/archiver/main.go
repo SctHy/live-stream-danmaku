@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"github.com/scthy/live-stream-danmaku/internal/mq"
-	"github.com/scthy/live-stream-danmaku/internal/store"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/scthy/live-stream-danmaku/internal/mq"
+	"github.com/scthy/live-stream-danmaku/internal/store"
 )
 
 func main() {

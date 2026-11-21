@@ -166,7 +166,7 @@ async function check() {
     await verify(proxies[0], false, ['retained'])
     await proxies[0].page.close()
     const expected = ['retained']
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < 360; i++) {
       const text = 'roll-' + i
       await send(text)
       expected.push(text)

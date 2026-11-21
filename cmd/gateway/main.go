@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
-	"github.com/scthy/live-stream-danmaku/internal/pubsub"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -12,12 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"encoding/json"
 	"github.com/scthy/live-stream-danmaku/internal/httpapi"
 	"github.com/scthy/live-stream-danmaku/internal/hub"
 	"github.com/scthy/live-stream-danmaku/internal/mq"
+	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 	"github.com/scthy/live-stream-danmaku/internal/store"
-	"log/slog"
 )
 
 func main() {
@@ -67,7 +67,7 @@ func main() {
 	m.MinBatchViewers = *minViewers
 	go m.Start()
 	r := http.NewServeMux()
-	httpapi.NewChatHandler(log, store.NewMessageRepo(db), m, sessions, *allowDev).Routes(r)
+	httpapi.NewChatHandler(store.NewMessageRepo(db), m, sessions, *allowDev).Routes(r)
 	r.HandleFunc("GET /livez", func(w http.ResponseWriter, req *http.Request) { w.WriteHeader(200) })
 	r.HandleFunc("GET /readyz", func(w http.ResponseWriter, req *http.Request) {
 		if m.Retiring() {

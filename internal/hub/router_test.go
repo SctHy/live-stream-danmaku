@@ -1,13 +1,14 @@
 package hub
 
 import (
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"testing"
+
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 func TestInvalidInputReturnsReceipt(t *testing.T) {
 	m := Hub{sendCapacity: 1}
-	c := m.NewClient(42, "", "room", nil)
+	c := m.NewClient(42, "room", nil)
 	m.dispatch(c, protocol.WsPacket{Type: protocol.TypeDanmaku})
 	f := <-c.Send
 	packets, err := protocol.DecodePackets(f.payload)

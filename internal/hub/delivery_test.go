@@ -38,7 +38,13 @@ func TestRoomBatchDrainsInOrder(t *testing.T) {
 		in <- []byte(string(rune('A' + i)))
 	}
 	close(in)
-	m.consumeRoom(context.Background(), "r", in)
+	b := roomBatch{hub: &m, room: "r"}
+	for payload := range in {
+		b.push(context.Background(), payload)
+	}
+	b.mu.Lock()
+	b.flush()
+	b.mu.Unlock()
 	total := 0
 	for len(m.deliveryQueues[0]) > 0 {
 		job := <-m.deliveryQueues[0]
@@ -84,7 +90,13 @@ func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
 				messages <- []byte(p)
 			}
 			close(messages)
-			m.consumeRoom(context.Background(), "r", messages)
+			b := roomBatch{hub: &m, room: "r"}
+			for payload := range messages {
+				b.push(context.Background(), payload)
+			}
+			b.mu.Lock()
+			b.flush()
+			b.mu.Unlock()
 			if len(jobs) != tc.wantJobs {
 				t.Fatalf("got %d jobs, want %d", len(jobs), tc.wantJobs)
 			}
@@ -97,7 +109,7 @@ func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
 
 func TestStalledViewerAndLatestStats(t *testing.T) {
 	m := Hub{sendCapacity: 1}
-	stalled := m.NewClient(1, "", "room", nil)
+	stalled := m.NewClient(1, "room", nil)
 	frame := m.frame([]byte("hello"), 1)
 	m.safeSend(stalled, frame)
 	for range 8 {
@@ -111,7 +123,7 @@ func TestStalledViewerAndLatestStats(t *testing.T) {
 	if m.clientDrops.Load() != 8 || m.shardDrops.Load() != 0 {
 		t.Fatal(m.Counters())
 	}
-	healthy := m.NewClient(2, "", "room", nil)
+	healthy := m.NewClient(2, "room", nil)
 	healthy.setStats(frame)
 	latest := m.frame([]byte("new"), 1)
 	healthy.setStats(latest)

@@ -21,7 +21,7 @@ if #tail>0 then
  epoch=tail[1][2][6] or ARGV[2]
  prev=epoch..'@'..tail[1][1]
 end
-local id=epoch..'@'..redis.call('XADD',KEYS[1],'MAXLEN',256,'*','packet',ARGV[1],'prev',prev,'epoch',epoch)
+local id=epoch..'@'..redis.call('XADD',KEYS[1],'MAXLEN','~',256,'*','packet',ARGV[1],'prev',prev,'epoch',epoch)
 redis.call('EXPIRE',KEYS[1],120)
 local wire='{"pos":"'..id..'","prev":"'..prev..'","packet":'..ARGV[1]..'}'
 redis.call('PUBLISH',KEYS[2],wire)

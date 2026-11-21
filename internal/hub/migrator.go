@@ -3,8 +3,9 @@ package hub
 import (
 	"context"
 	"encoding/json"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"time"
+
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 // Migrate marks the gateway unready before snapshotting membership. A notified

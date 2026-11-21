@@ -3,11 +3,12 @@ package mq
 import (
 	"context"
 	"errors"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"log/slog"
 	"math/rand/v2"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 func persist(ctx context.Context, store batchStore, batch []*protocol.DanmakuMessage, log *slog.Logger) error {

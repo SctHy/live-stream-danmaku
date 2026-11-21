@@ -4,11 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"github.com/redis/go-redis/v9"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/redis/go-redis/v9"
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 func TestJournalRecoveryAndWithdrawal(t *testing.T) {
@@ -40,9 +41,9 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 		}
 		return res
 	}
-	publish(101, "first")
+	publish(protocol.TypeDanmaku, "first")
 	first := recoverFrom("").Position
-	publish(101, "second")
+	publish(protocol.TypeDanmaku, "second")
 	publish(protocol.TypeWithdraw, "first")
 	all := recoverFrom("")
 	if len(all.Events) != 3 || all.Events[0].Type != protocol.TypeWithdraw || string(all.Events[0].Data) != `{"event_id":"first"}` {
@@ -52,17 +53,17 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 	if missed.Reset || len(missed.Events) != 2 || missed.Events[0].Previous != first {
 		t.Fatal(missed)
 	}
-	for range 256 {
-		publish(101, "next")
+	for range 512 {
+		publish(protocol.TypeDanmaku, "next")
 	}
 	trimmed := recoverFrom(first)
-	if !trimmed.Reset || len(trimmed.Events) != 256 {
+	if !trimmed.Reset || len(trimmed.Events) < 256 || len(trimmed.Events) >= 512 {
 		t.Fatal("trim did not signal reset")
 	}
 	if err := r.Del(ctx, key).Err(); err != nil {
 		t.Fatal(err)
 	}
-	publish(101, "new stream")
+	publish(protocol.TypeDanmaku, "new stream")
 	fresh := recoverFrom(trimmed.Position)
 	if !fresh.Reset || len(fresh.Events) != 1 {
 		t.Fatal(fresh)

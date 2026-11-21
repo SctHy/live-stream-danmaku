@@ -1,17 +1,16 @@
 package hub
 
 import (
-	"context" // context is used to manage the lifecycle of the Redis client
-	"fmt"
-	"github.com/scthy/live-stream-danmaku/internal/mq"
-	"github.com/scthy/live-stream-danmaku/internal/pubsub"
+	"context"
+	"crypto/rand"
 	"hash/maphash"
 	"log/slog"
-	"math/rand"
-	"os"
 	"sync"
 	"sync/atomic"
-	"time" //broadcast stats data timer
+	"time"
+
+	"github.com/scthy/live-stream-danmaku/internal/mq"
+	"github.com/scthy/live-stream-danmaku/internal/pubsub"
 )
 
 type BroadcastJob struct {
@@ -25,6 +24,7 @@ type Hub struct {
 	producer  *mq.Producer
 	life      context.Context
 	stop      context.CancelFunc
+	drainErr  error
 	drainOnce sync.Once
 	retiring  atomic.Bool
 
@@ -64,16 +64,15 @@ type Hub struct {
 }
 
 const (
-	BroadCastInterVal    = 3 * time.Second
-	BroadcastChanSize    = 1024
+	statsInterval = 3 * time.Second
+
 	BroadcastJobChanSize = 1000
 	RoomShards           = 32
 )
 
 func New(log *slog.Logger, producer *mq.Producer, store *pubsub.Store, sendCapacity, shards, muxShards int) *Hub {
 
-	hostname, _ := os.Hostname()
-	serverID := fmt.Sprintf("%s-%d", hostname, rand.Intn(100000))
+	serverID := rand.Text()
 
 	life, cancel := context.WithCancel(context.Background())
 	m := &Hub{
@@ -106,7 +105,7 @@ func (m *Hub) Start() {
 	m.log.Info("[MANAGER] Multi-room Hub started")
 	m.StartWorkers()
 	close(m.started)
-	statsTicker := time.NewTicker(BroadCastInterVal)
+	statsTicker := time.NewTicker(statsInterval)
 	defer statsTicker.Stop()
 
 	for {
@@ -148,6 +147,7 @@ func (m *Hub) Drain(ctx context.Context) error {
 		m.stop()
 		m.CloseClients()
 		m.mux.Close()
+		m.drainErr = m.producer.Drain(ctx)
 	})
-	return m.producer.Drain(ctx)
+	return m.drainErr
 }

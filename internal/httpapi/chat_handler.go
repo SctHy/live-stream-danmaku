@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -22,27 +23,21 @@ import (
 	"github.com/scthy/live-stream-danmaku/internal/hub"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"github.com/scthy/live-stream-danmaku/internal/pubsub"
-	"log/slog"
+	"github.com/scthy/live-stream-danmaku/internal/store"
 )
 
 //go:embed web/*
 var assets embed.FS
 
-type historyStore interface {
-	Playback(ctx context.Context, room string, from, until, after int64) ([]protocol.DanmakuMessage, error)
-	Withdraw(ctx context.Context, room, eventID string) error
-}
-
 type ChatHandler struct {
-	history  historyStore
+	history  *store.MessageRepo
 	manager  *hub.Hub
 	sessions *pubsub.Store
 	allowDev bool
-	log      *slog.Logger
 }
 
-func NewChatHandler(log *slog.Logger, history historyStore, m *hub.Hub, sessions *pubsub.Store, allowDev bool) *ChatHandler {
-	return &ChatHandler{history, m, sessions, allowDev, log}
+func NewChatHandler(history *store.MessageRepo, m *hub.Hub, sessions *pubsub.Store, allowDev bool) *ChatHandler {
+	return &ChatHandler{history, m, sessions, allowDev}
 }
 
 func (h *ChatHandler) Routes(mux *http.ServeMux) {
@@ -152,7 +147,7 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 	if err != nil {
 		return
 	}
-	client := h.manager.NewClient(uid, r.URL.Query().Get("name"), room, conn)
+	client := h.manager.NewClient(uid, room, conn)
 
 	if r.URL.Query().Get("migrate") == "1" {
 		client.EnableMigration()
@@ -169,15 +164,15 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 		h.manager.Leave(client)
 		return
 	}
-	{
-		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		clock, _ := json.Marshal(protocol.ClockReady{ServerTimeMS: time.Now().UnixMilli()})
-		if err := conn.WriteJSON(protocol.WsPacket{Type: protocol.TypeReady, Data: clock}); err != nil {
-			client.Close()
-			h.manager.Leave(client)
-			return
-		}
+
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	clock, _ := json.Marshal(protocol.ClockReady{ServerTimeMS: time.Now().UnixMilli()})
+	if err := conn.WriteJSON(protocol.WsPacket{Type: protocol.TypeReady, Data: clock}); err != nil {
+		client.Close()
+		h.manager.Leave(client)
+		return
 	}
+
 	go client.WritePump()
 	client.ReadPump(h.manager)
 }

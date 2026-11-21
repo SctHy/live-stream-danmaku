@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	"encoding/json" //Delayed Parsing
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,17 +17,13 @@ const (
 	TypeMigrate  = 107
 )
 
-// WsPacket is the standard wrapper for ALL websocket communications.
-// Every message sent or received must follow this structure.
-// It contains metadata required for ROUTING without parsing the inner payload.
+// WsPacket carries a typed payload and optional recovery cursors.
 type WsPacket struct {
-	// Type tells the receiver what 'Data' contains.
-	Position string `json:"pos,omitempty"`
-	Previous string `json:"prev,omitempty"`
-	Type     int    `json:"type"`
-	RoomID   string `json:"room_id,omitempty"` // Routing key
-	// type RawMessage []byte,rather than map[int]interface{} using Assert
-	Data json.RawMessage `json:"data"`
+	Position string          `json:"pos,omitempty"`
+	Previous string          `json:"prev,omitempty"`
+	Type     int             `json:"type"`
+	RoomID   string          `json:"room_id,omitempty"`
+	Data     json.RawMessage `json:"data"`
 }
 
 // DanmakuMessage is a persisted event and the WebSocket chat payload.
@@ -48,15 +44,12 @@ func (d DanmakuMessage) FitsHistory() bool {
 		!strings.ContainsRune(d.RoomID, 0) && !strings.ContainsRune(d.Content, 0) && !strings.ContainsRune(d.EventID, 0)
 }
 
-// StatsData: The content for TypeStats
 type StatsData struct {
 	Position string `json:"pos,omitempty"`
 	Online   uint64 `json:"online"`
 	Likes    uint64 `json:"likes"`
 }
 
-// CmdLike: The content for TypeLike (Client -> Server)
-// Currently empty, but extensible (e.g., send 10 likes at once).
 type Like struct {
 	Count uint64 `json:"count"`
 }

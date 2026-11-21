@@ -1,9 +1,9 @@
 package hub
 
 import (
-	"context" // context is used to manage the lifecycle of the Redis client
+	"context"
 	"encoding/json"
-	"time" //broadcast stats data timer
+	"time"
 
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
@@ -32,7 +32,7 @@ func (m *Hub) broadcastStats() {
 	flush := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		stats, err := m.store.SnapshotStats(ctx, m.ServerID, chunk, currentBatchLikes, BroadCastInterVal*2+time.Second)
+		stats, err := m.store.SnapshotStats(ctx, m.ServerID, chunk, currentBatchLikes, statsInterval*2+time.Second)
 		if err != nil {
 			m.log.Warn("Room statistics unavailable", "error", err)
 			return

@@ -1,7 +1,7 @@
 package hub
 
 import (
-	"context" // context is used to manage the lifecycle of the Redis client
+	"context"
 )
 
 func (m *Hub) handleRegister(client *Client) {
@@ -20,13 +20,8 @@ func (m *Hub) handleRegister(client *Client) {
 		ctx, cancel := context.WithCancel(m.life)
 		m.cancelSub[client.RoomID] = cancel
 
-		messages := make(chan []byte, 256)
-		ready, err := m.mux.Subscribe(ctx, client.RoomID, func(data []byte) {
-			select {
-			case messages <- data:
-			case <-ctx.Done():
-			}
-		})
+		batch := &roomBatch{hub: m, room: client.RoomID}
+		ready, err := m.mux.Subscribe(ctx, client.RoomID, func(data []byte) { batch.push(ctx, data) })
 		if err != nil {
 			cancel()
 			delete(m.Rooms, client.RoomID)
@@ -35,7 +30,7 @@ func (m *Hub) handleRegister(client *Client) {
 			return
 		}
 		m.ready[client.RoomID] = ready
-		go m.consumeRoom(ctx, client.RoomID, messages)
+
 		m.log.Info("[MANAGER] New room created on server", "room", client.RoomID)
 	}
 

@@ -2,7 +2,7 @@ package hub
 
 import (
 	"hash/maphash"
-	"time" //broadcast stats data timer
+	"time"
 )
 
 func (m *Hub) StartWorkers() {

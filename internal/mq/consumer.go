@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
 	"github.com/twmb/franz-go/pkg/kgo"
-	"log/slog"
 )
 
 type batchStore interface {
@@ -14,9 +15,17 @@ type batchStore interface {
 }
 
 func Consume(ctx context.Context, brokers []string, store batchStore, log *slog.Logger) error {
-	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.ConsumeTopics(topic), kgo.ConsumerGroup("danmaku_group_v1"), kgo.DisableAutoCommit(), kgo.AllowAutoTopicCreation(), kgo.BlockRebalanceOnPoll(), kgo.OnPartitionsRevoked(func(_ context.Context, _ *kgo.Client, partitions map[string][]int32) {
-		log.Debug("Partitions released", "partitions", partitions)
-	}))
+	cl, err := kgo.NewClient(
+		kgo.SeedBrokers(brokers...),
+		kgo.ConsumeTopics(topic),
+		kgo.ConsumerGroup("danmaku_group_v1"),
+		kgo.DisableAutoCommit(),
+		kgo.AllowAutoTopicCreation(),
+		kgo.BlockRebalanceOnPoll(),
+		kgo.OnPartitionsRevoked(func(_ context.Context, _ *kgo.Client, partitions map[string][]int32) {
+			log.Debug("Partitions released", "partitions", partitions)
+		}),
+	)
 	if err != nil {
 		return err
 	}

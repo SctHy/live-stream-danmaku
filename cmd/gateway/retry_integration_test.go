@@ -43,7 +43,7 @@ func TestRetryAcrossGateways(t *testing.T) {
 		}
 		return conn
 	}
-	req := map[string]any{"type": 101, "data": map[string]any{"content": "retry", "video_offset_ms": 42, "client_msg_id": "retry-1"}}
+	req := map[string]any{"type": protocol.TypeDanmaku, "data": map[string]any{"content": "retry", "video_offset_ms": 42, "client_msg_id": "retry-1"}}
 	observer := dial(b)
 	defer observer.Close()
 	first := dial(a)

@@ -1,317 +1,61 @@
-# 🎬 Live-Stream-Danmaku — 高性能直播弹幕后端系统
+# Live Stream Danmaku
 
-> Go 直播弹幕网关，支持跨网关房间广播、断线补发、撤回与时间轴回放。
->
-> 本机双网关实测：同一房间 **10,000 个 WebSocket 观众、50 条弹幕/秒、持续 15 分钟**，逐观众核验 **4.5 亿次投递**，缺失与重复均为零。使用 180 ms 合批窗口，两个热房探针收包 P99 分别为 286 / 293 ms。[实验条件、失败档与复现方法](docs/hot-room-capacity.md)
+Go 弹幕网关与历史归档服务。浏览器可以在房间内发言、点赞、补收离线期间的消息，并按媒体时间查询回放。每个房间可包含多个独立场次。
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Go-1.27.4-00ADD8?style=flat&logo=go" alt="Go">
-  <img src="https://img.shields.io/badge/Redis-Pub%2FSub-DC382D?style=flat&logo=redis&logoColor=white" alt="Redis">
-  <img src="https://img.shields.io/badge/Kafka-Async%20Producer-231F20?style=flat&logo=apachekafka&logoColor=white" alt="Kafka">
-  <img src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat&logo=postgresql&logoColor=white" alt="PostgreSQL">
-  <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-</p>
+```mermaid
+flowchart LR
+    B[浏览器] <-->|HTTP / WebSocket| G[Gateway]
+    G -->|原子校验、写恢复流并发布| R[(Redis 7)]
+    R -->|共享订阅| G
+    G -->|新接受的弹幕| K[Kafka KRaft]
+    K --> A[Archiver]
+    A -->|按分区批量写入| P[(PostgreSQL 17)]
+    G -->|回放、撤回| P
+```
 
----
+## 本地启动
 
-[优化迭代记录](docs/optimization-log.md)汇总每次调整的原因、做法和验证结果。
-
-## 在 Mac 上打开弹幕放映室
+需要 Go 1.27.4、Docker Compose 和 Make。在项目根目录执行以下命令，两个 Go 服务各占一个终端。
 
 ```sh
-./scripts/dev-mac.sh --open
+make up
+make run-archiver
+# 在另一个终端
+make run-gateway
 ```
 
-脚本复用项目所在的 Docker context 和实际映射端口，运行原生 Go 网关与消费者，在 Ardia 打开本机页面。支持按房间和场次直播、发送回执、断线补发、视频时间轴回放、禁言和撤回。静态页面和示例视频随网关分发。配置、协议与双网关实测见[macOS 和 Ardia 使用说明](docs/macos-browser.md)。
+打开 [本地放映室](http://127.0.0.1:8080/)。默认画面为 60 秒循环计时，可导入本地视频与弹幕 JSON 回放。用相同的房间名和场次打开第二个窗口，即可观察广播。
 
-## ❓ 项目背景
+## 发送与恢复
 
-直播弹幕系统看似简单，实则暗藏多个技术难点：
+- 网关先分配 HttpOnly 访客 Cookie，再通过 `/api/rooms/{room}/{session}/live` 建立 WebSocket。Lua 在同一房间哈希槽内检查幂等键、禁言及限流，追加恢复流并广播。原始 JSON 进入嵌套信封，64 位用户 ID 不经过 Lua 浮点转换。
+- 最近消息保留约 256 条，房间停止写入 120 秒后过期。客户端用 `/recent?after=游标` 补收，游标过期时按返回的快照重置。相同用户和请求 ID 在 10 分钟内重复发送，会获得原事件 ID。
+- 每个网关默认使用 8 条 Redis 订阅连接。协商批协议的本地观众达到 128 人且连续到达间隔不超过 2 ms 时，网关最多聚合 5 ms、32 条或 32 KiB。32 个派发分片共享房间成员快照。每个连接最多积压 512 帧和 256 KiB，连续 8 次入队失败即关闭。
+- 接受新事件后，网关将其送入有界 Kafka 生产缓冲区。实时回执表示 Redis 已接受消息。网关在投递前崩溃、缓冲区耗尽或 Kafka 写入失败时，已广播的消息可能缺少历史记录。`/metrics` 提供异步投递失败计数。归档器按分区执行 PostgreSQL `UNNEST` 批写，在保存后提交位点，用唯一事件 ID 吸收重放。数据或约束错误触发逐条隔离与死信日志。
+- 收到 SIGTERM 后，网关先让 `/readyz` 返回 503 并拒绝新连接，再每 100 ms 分批邀请客户端迁移。客户端通过同一入口连接可用网关，补齐游标后释放旧连接。网关在交接结束或超时后关闭连接并刷新生产缓冲区。多实例部署需要入口按就绪状态摘除退役网关。
 
-1. **高并发连接** — 几十万人同时在线，服务器如何抗住？
-2. **广播风暴** — 1 条弹幕如何实时发给同一直播间的几万用户？
-3. **削峰填谷** — 瞬时百万条弹幕，PostgreSQL 怎么撑住不崩？
-4. **数据一致性** — 分布式环境下，在线人数、点赞数如何实时且准确？
+## 配置与验证
 
-本项目是对上述问题的完整工程实践。
+| 配置 | 默认值或作用 |
+|---|---|
+| `REDIS_ADDR` | `127.0.0.1:6379`，集群可提供逗号分隔的种子地址 |
+| `KAFKA_BROKERS` | `127.0.0.1:9092`，多个地址以逗号分隔 |
+| `DATABASE_URL` | Compose 默认连接到本机 5432 的 `danmaku_db` |
+| `DANMAKU_MOD_ROOM`、`DANMAKU_MOD_TOKEN` | 两项都配置后，指定房间可使用 Bearer 密钥撤回或限时禁言 |
+| `-pubsub-shards`、`-room-shards` | 每个网关的 Redis 订阅连接和下行派发分片数 |
+| `-migration-batch`、`-migration-inflight`、`-migration-timeout` | 默认每批 100 个邀请、最多 64 个在途交接、30 秒超时 |
+| `-log-format` | 两个服务都支持 `json`（默认）和 `text` |
+| `-allow-dev-guest` | 默认关闭。启用后，回环地址上无 Origin 的压测客户端可用 `uid` 参数建连 |
 
----
-
-## 📊 性能数据
-
-下表为旧版在本地 WSL2 环境的历史记录。本次 KRaft 与广播、落库改造的独立对照见[实测报告](docs/kraft-benchmarks.md)。
-
-| 指标 | 数据 |
-|------|------|
-| ⚡ 连接能力 | 稳定支撑 **6万+** 静态长连接（受限于本地端口/内存） |
-| 🚀 吞吐极限 | 峰值下行广播达 **150万 QPS** |
-| ⬆️ 上行处理 | 单机稳定处理 **2.5万 QPS** 上行请求（写入 Redis + Kafka） |
-| 🛡️ 交付保障 | 极限负载下，周期丢包率 **< 1%**，系统稳定无 Error |
-| 💾 落盘效率 | Kafka 消费者批量写入，**500万条积压弹幕 2 分钟内全部落盘**，平均 40k QPS |
-
-另外实现了直播房间在线人数 + 点赞数定时广播。
-
----
-
-## 🏗️ 系统架构
-
-```text
-浏览器 / CLI ──WebSocket──► Go 网关 ──Redis 房间频道──► 各网关 ──► 房内观众
-                              └──待归档队列──► Kafka ──► 消费者 ──► PostgreSQL
-浏览器 ──HTTP──► 近期补发读取 Redis；回放与撤回使用历史仓储
+```sh
+make test
+go vet ./...
+make bench-fanout ARGS='-viewers 160 -rate 800 -seconds 4'
+go run ./cmd/bench rooms
+go build -o /tmp/danmaku-gateway ./cmd/gateway
+go run ./cmd/bench migration -gateway /tmp/danmaku-gateway -viewers 24
 ```
 
----
+设置 `DANMAKU_TEST_REDIS_ADDR`、`DANMAKU_TEST_DATABASE_URL` 可启用 Redis 与 PostgreSQL 集成测试。双网关测试还需将 `DANMAKU_TEST_GATEWAY_A` 和 `DANMAKU_TEST_GATEWAY_B` 指向共享测试栈的网关并运行归档器。房管测试使用 `DANMAKU_MOD_ROOM=retry` 和相同密钥。
 
-## 💡 技术选型与设计
-
-### 1. 🚀 Server 层
-
-- **Go + Gin + Gorilla WebSocket**：协程处理长 WebSocket 连接，内存占用极低，天然适合直播间用户连接
-- HTTP 层通过历史仓储接口处理回放与撤回，WebSocket 网关负责弹幕和点赞，Kafka 消费者独立写入历史。
-
-### 2. 📡 分布式消息 — Redis
-
-- **Redis Pub/Sub**：实现多台服务器之间的弹幕实时广播，秒级送达
-- **按直播间房号区分频道**：`room:{roomID}:pubsub`，天然隔离
-- **Redis 原子计数**：`INCRBY` 处理点赞的超高频读写
-- **心跳式在线人数**：每 3 秒各 Server 上报本机在线数（带 TTL），聚合计算全局在线人数，Server 宕机自动过期
-
-### 3. 📈 削峰填谷 — Kafka
-
-- **浏览器发言归档**：Redis 原子记录发言和待转发事件，消费者进程收到 Kafka 确认后清理待转发记录
-- **Snappy 压缩 + 批量 Flush**：减少网络请求次数，提升吞吐
-- **Consumer Group + 批量落盘**：每个 Kafka 分区独立攒批，使用 PostgreSQL UNNEST 批量写入；事务成功后标记该批次的消费位点
-
-Kafka 地址可通过 `KAFKA_BROKERS` 配置，多个地址用逗号分隔。浏览器发言在同一场次、同一身份下用相同的 `client_msg_id` 重试，10 分钟内返回原事件 ID。Kafka 停机时待归档记录保存在 Redis，全局积压达到 65,536 条时拒绝新发言。用 `XLEN dm:archive:pending` 查看待转发量，用消费组 lag 查看 Kafka 中的积压。此保障依赖 Redis 保留数据。本机 CLI 和压测入口沿用网关内存历史队列。
-
-双网关滚动发布使用就绪探针摘流、分批通知及游标交接。部署参数和万人对照实验见[网关滚动下线](docs/gateway-migration.md)。
-
-### 4. 🛡️ 广播优化
-
-客户端可协商 WebSocket 子协议 `danmaku.batch.v1`，收包时兼容单个对象和对象数组；仓库自带命令行客户端已支持。旧协议逐条投递。房间达到 128 位已协商观众（可调 `-batch-min-viewers`）后，连续到达间隔低于配置门槛时触发合批（默认 2 ms，可用 `-batch-arrival-gap` 调整），默认最多等待 5 ms、32 条或 32 KiB，先到即发。稀疏消息直接发送。服务端参数 `-batch-window 0` 关闭合批，`-prepared=true` 开启跨连接共享预制帧。实测与故障语义见[广播与存储验证](docs/fanout-benchmarks.md)。
-
-
-- **Sharding Workers**：32 个房间哈希分片，各自串行处理发布和下行分发；同分片房间共享队列
-- **缓存房间成员快照**：成员变更后重建，广播间复用
-- **非阻塞 safeSend**：每连接默认最多缓冲 512 个弹幕帧，待写数据上限 256 KiB，超过任一上限按包数记录丢弃。单次 socket 写超时为 5 秒，连续 8 次入队失败会断开该连接。统计帧单独保留最新值
-- **读写锁分离**：`RLock` 广播遍历 + `Lock` 注册/注销，广播不阻塞连接管理
-
----
-
-## 📁 项目结构
-
-```
-.
-├── cmd/
-│   ├── server/          # 弹幕 WebSocket 服务器入口
-│   ├── consumer/        # Kafka 消费者落盘服务入口
-│   ├── client/          # 交互式 CLI 客户端
-│   └── benchmark/       # 压测工具（WebSocket + Kafka Producer）
-│       ├── fanout/      # 热房投递正确性与延迟
-│       ├── rooms/       # 热房对冷房的影响
-│       └── kafka/       # Kafka 纯写入吞吐压测
-├── internal/
-│   ├── api/             # Handler 层 (Gin Controller + WebSocket Upgrade)
-│   ├── repo/            # Repo 层 (pgxpool 与参数化 SQL)
-│   ├── model/           # 数据模型 (WsPacket / DanmakuMessage / StatsData / Like)
-│   ├── ws/              # WebSocket 核心 (Manager / Client / Router)
-│   ├── consumer/        # Kafka 消费者 Handler (批量落盘 + 重试)
-│   ├── infra/           # 基础设施 (Redis / Kafka / PostgreSQL 初始化)
-│   └── logger/          # Zap 日志 (dev 彩色 / prod JSON)
-├── docker-compose.yaml  # 一键启动 Redis + PostgreSQL + Kafka (KRaft)
-├── go.mod
-└── go.sum
-```
-
----
-
-## 🔌 WebSocket 协议
-
-所有通信均使用 `WsPacket` 信封格式：
-
-```json
-{
-  "type": 101,
-  "room_id": "room_0",
-  "data": { ... }
-}
-```
-
-| type | 常量 | 方向 | data 内容 |
-|------|------|------|-----------|
-| 101 | `TypeDanmaku` | C→S / S→C | `{"room_id":"...", "user_id":123, "content":"hello", "send_time":"..."}` |
-| 102 | `TypeStats` | S→C | `{"online":50000, "likes":12000}` |
-| 103 | `ActionLike` | C→S | `{"count":1}` |
-
----
-
-## 🚀 快速开始
-
-### 前置依赖
-
-- Go 1.27.4+
-- Docker & Docker Compose
-
-### 1. 启动基础设施
-
-```bash
-docker compose up -d
-```
-
-将启动 Redis (6379)、PostgreSQL (5432)、单节点 Kafka KRaft (9092)。宿主机应用连接 127.0.0.1:9092，同一 Compose 网络内连接 kafka:29092。Kafka 数据和消费组位点保存在 kafka_data 命名卷。旧 ZooKeeper 部署如有待保留的日志或位点，应先按 [Kafka 元数据迁移说明](https://kafka.apache.org/39/operations/kraft/) 完成迁移；新卷启动的是空集群。
-
-如果本机 6379 已占用，可以用 `REDIS_PORT=26379 docker compose up -d`，并在运行弹幕服务时设置 `REDIS_ADDR=127.0.0.1:26379`。
-
-PostgreSQL 使用命名卷 `postgres_data` 保存历史记录。默认连接为 `postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable`。连接其他实例时，请为服务端和消费者设置同一个 `DATABASE_URL`。两个进程启动时通过 pgxpool 在事务锁内执行尚未登记的版本化 SQL，版本记录保存在 `danmaku_schema_migrations`。基线迁移可接管既有表，历史记录允许 event_id 为空。
-
-可用以下命令进入数据库练习 SQL：
-
-```bash
-docker compose exec postgres psql -U danmaku -d danmaku_db
-```
-
-### 2. 启动弹幕服务器
-
-```bash
-go run cmd/server/main.go -port 8080
-```
-
-### 3. 启动 Kafka 消费者（落盘服务）
-
-```bash
-go run cmd/consumer/main.go
-```
-
-### 4. 连接客户端
-
-```bash
-# 交互式 CLI 客户端
-go run cmd/client/main.go -uid 1001 -room 1001 -port 8080
-
-# 输入文字发送弹幕，输入 1 发送点赞
-```
-
-### 5. 压测
-
-```bash
-# 热房压测（逐观众校验，连接已启动的网关）
-go run ./cmd/benchmark/fanout -browser -viewers 1000 -rate 50 -seconds 10
-
-# Kafka 纯写入吞吐压测
-go run cmd/benchmark/kafka/kafka.go
-```
-
----
-
-## 🔧 关键配置参数
-
-### Manager 常量 (`internal/ws/manager.go`)
-
-| 参数 | 值 | 说明 |
-|------|----|------|
-| `BroadCastInterVal` | 3s | 统计广播间隔 |
-| `BroadcastChanSize` | 1024 | 发布缓冲总预算，各分片均分 |
-| `BroadcastJobChanSize` | 1000 | 下行任务缓冲总预算，均分后向上取整 |
-| `RoomShards` | 32 | 发布和分发的房间分片数 |
-
-### Client 常量 (`internal/ws/client.go`)
-
-| 参数 | 值 | 说明 |
-|------|----|------|
-| `SendChanSize` | 512 | 单客户端发送缓冲，可用服务端参数 `-send-queue 128` 等覆盖 |
-
-### Kafka Producer 常量 (`internal/infra/kafka.go`)
-
-| 参数 | 值 | 说明 |
-|------|----|------|
-| `ProducerChanBufSize` | 16384 | Sarama Channel 缓冲 |
-| `Flush.Messages` | 50 | 批量消息数阈值 |
-| `Flush.Frequency` | 50ms | 批量等待时间阈值 |
-| `Compression` | Snappy | 压缩算法 |
-
-### Consumer 常量 (`internal/consumer/handler.go`)
-
-| 参数 | 值 | 说明 |
-|------|----|------|
-| `FlushInterval` | 2s | DB 刷盘间隔 |
-| 写入重试间隔 | 1s | 当前分区等待数据库恢复；消费会话结束时释放分区 |
-
----
-
-## 🧩 核心流程
-
-### 弹幕发送流程
-
-```
-Client ──WS──► Handler ──► Router (TypeDanmaku)
-                                │
-                    ┌───────────┼───────────┐
-                    ▼                       ▼
-            Kafka Async Producer      Redis Pub/Sub
-            (持久化缓冲)              (跨服务器广播)
-                    │                       │
-                    ▼                       ▼
-            Kafka Cluster          其他 Server 的
-                                       subscribeToRoom
-                                           │
-                                           ▼
-                                  broadcastToLocalClients
-                                           │
-                                           ▼
-                                  房间分片 Worker ──► Client.Send
-```
-
-### 在线人数 / 点赞数广播流程
-
-```
-Manager (每3秒 Ticker)
-    │
-    ├─ 1. 本地点赞批量聚合 → Redis INCRBY
-    ├─ 2. 上报本机在线数 (SETEX + TTL) → Redis Pipeline
-    ├─ 3. 聚合全局在线数 (SMembers + MGet)
-    ├─ 4. 获取全局点赞数 (GET)
-    │
-    ▼
-broadcastToLocalClients (TypeStats)
-    │
-    ▼
-所有本房间客户端收到 {"online": N, "likes": M}
-```
-
----
-
-## 📌 技术亮点
-
-- **信封协议设计**：`WsPacket` + `json.RawMessage` 延迟解析，路由层无需反序列化内部数据
-- **历史幂等**：服务端为弹幕生成 event_id，旧格式消息使用 Kafka 主题、分区和位点生成幂等键。
-- **消费恢复**：会话结束后从已提交位点继续，重复批次通过 PostgreSQL 唯一索引去重。
-- **Kafka 背压**：数据库持续写入失败时暂停该分区推进，待修复后重试。
-- **Server 心跳**：Redis Key 带 TTL，Server 宕机后自动清理，在线数自动修正
-
----
-
-## 🛣️ 未来规划
-
-- [ ] JWT 鉴权接入
-- [ ] 配置文件化（Viper / YAML）
-- [ ] Kubernetes 部署 + HPA 弹性伸缩
-- [ ] 弹幕敏感词过滤
-- [ ] WebSocket 压缩扩展 (permessage-deflate)
-- [ ] gRPC 内部通信
-- [ ] Prometheus + Grafana 监控
-
----
-
-## 👤 作者
-
-**charlesAcmen**
-
-- 📕 小红书：[charlesAcmen](https://www.xiaohongshu.com/user/profile/60b9ea030000000001006c68)
-- 🐙 GitHub：[charlesAcmen](https://github.com/charlesAcmen)
-
----
-
-## 📄 开源协议
-
-本项目基于 [MIT License](LICENSE) 开源，欢迎 Star、Fork 和 PR！
+压测环境、复现命令和实测结果见[基准报告](docs/benchmarks.md)。

@@ -51,16 +51,17 @@
             <p id="sample-status" role="status"></p>
           </details>
           <div class="screen">
-            <video
+            <canvas id="clock" width="960" height="540" aria-label="放映计时"></canvas>
+            <video hidden
               id="video"
               muted
               playsinline
               controls
               preload="auto"
-              src="/assets/study.mp4"
             ></video>
             <div id="overlay" aria-hidden="true"></div>
           </div>
+          <label id="timeline" hidden>回放进度 <input id="seek" type="range" min="0" max="59999" value="0" step="100"></label>
           <form id="compose">
             <input
               id="message"

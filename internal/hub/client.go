@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-
-	"github.com/scthy/live-stream-danmaku/internal/protocol" //database structures
+	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
 const (
@@ -25,8 +24,8 @@ type Client struct {
 	consecutiveDrops atomic.Uint32
 	stats            chan *outboundFrame
 	UserID           uint64 // client id
-	Username         string
-	RoomID           string
+
+	RoomID string
 
 	Socket       *websocket.Conn // the websocket connection that the server holds for each client
 	batch        bool
@@ -38,27 +37,26 @@ type Client struct {
 	once sync.Once
 }
 
-func (m *Hub) NewClient(uid uint64, name, room string, conn *websocket.Conn) *Client {
+func (m *Hub) NewClient(uid uint64, room string, conn *websocket.Conn) *Client {
 	return &Client{
 		registered: make(chan struct{}),
 		stats:      make(chan *outboundFrame, 1),
 		batch:      conn != nil && conn.Subprotocol() == protocol.BatchProtocol,
 		UserID:     uid,
-		Username:   name,
-		RoomID:     room,
-		Socket:     conn,
-		Send:       make(chan *outboundFrame, m.sendCapacity),
-		done:       make(chan struct{}),
+
+		RoomID: room,
+		Socket: conn,
+		Send:   make(chan *outboundFrame, m.sendCapacity),
+		done:   make(chan struct{}),
 	}
 }
 
 // EnableMigration is negotiated before the client joins the room.
 func (c *Client) EnableMigration() { c.migration = make(chan struct{}, 1) }
 
-// ReadPump: clients read from websocket to receive message, then send to manager to broadcast
 func (c *Client) ReadPump(manager *Hub) {
 	defer func() {
-		// if read failed (client disconnected), unregister the client
+
 		manager.Leave(c)
 		c.Socket.Close()
 	}()
@@ -67,7 +65,7 @@ func (c *Client) ReadPump(manager *Hub) {
 	c.Socket.SetReadDeadline(time.Now().Add(PongWait))
 	c.Socket.SetPongHandler(func(string) error { return c.Socket.SetReadDeadline(time.Now().Add(PongWait)) })
 	for {
-		// 1. read message from WebSocket
+
 		_, messageBytes, err := c.Socket.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err,
@@ -82,21 +80,16 @@ func (c *Client) ReadPump(manager *Hub) {
 			break // if read error, break the loop
 		}
 
-		// 2. Parse the Envelope (WsPacket)
 		var packet protocol.WsPacket
 		if err := json.Unmarshal(messageBytes, &packet); err != nil {
 			manager.log.Error("[CLIENT]Invalid JSON format", "uid", c.UserID)
 			continue
 		}
 
-		// 3. Dispatch to Handler
-		// We pass 'manager' because handlers need to Broadcast or AddLike.
 		manager.dispatch(c, packet)
 	}
 }
 
-// WritePump: listen from Send channel, once there is a message, write to WebSocket
-// i.e pumps messages from the hub to the websocket connection
 func (c *Client) WritePump() {
 	defer func() {
 		c.Socket.Close()
@@ -153,13 +146,12 @@ func (c *Client) setStats(frame *outboundFrame) {
 // It is idempotent thanks to sync.Once.
 func (c *Client) Close() {
 	c.once.Do(func() {
-		// 1. Close the done channel to signal WritePump and other observers
+
 		close(c.done)
-		// 2. Close the physical connection
+
 		if c.Socket != nil {
 			c.Socket.Close()
 		}
-		// Note: We DO NOT close c.Send here to prevent panic in workers
-		// manager.log.Info("[CLIENT] Connection closed safely", "uid", c.UserID)
+
 	})
 }

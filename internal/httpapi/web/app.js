@@ -6,7 +6,17 @@ $('join').elements.room.value = room
 $('join').elements.session.value = session
 const base = '/api/rooms/' + [room, session].map(encodeURIComponent).join('/')
 const video = $('video')
-const demoSource = video.getAttribute('src')
+const canvas = $('clock')
+const brush = canvas.getContext('2d')
+const cycle = 60000
+let replayStart = performance.now()
+function mediaTime() {
+  if (sample) return Math.floor(video.currentTime * 1000)
+  const elapsed = live
+    ? (clock ? clock.server + performance.now() - clock.local : Date.now())
+    : performance.now() - replayStart
+  return Math.floor(elapsed % cycle)
+}
 const listLimit = 100
 const overlayLimit = 20
 let sample = null
@@ -19,22 +29,6 @@ let socket,
   retries = 0,
   lane = 0
 let clock = null
-function alignLiveClip() {
-  if (
-    live &&
-    clock &&
-    Number.isFinite(clock.server) &&
-    Number.isFinite(video.duration) &&
-    video.duration > 0
-  ) {
-    video.currentTime =
-      ((clock.server + performance.now() - clock.local) / 1000) % video.duration
-  }
-}
-video.addEventListener('loadedmetadata', alignLiveClip)
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) alignLiveClip()
-})
 let pendingSend = null
 let userID = null
 let visible = new Map(),
@@ -84,7 +78,7 @@ function show(d, animate) {
   span.className = 'fly'
   span.dataset.id = d.event_id
   span.style.top = (lane++ % 5) * 17 + '%'
-  span.style.setProperty('--travel', video.clientWidth + 'px')
+  span.style.setProperty('--travel', $('overlay').clientWidth + 'px')
   $('overlay').append(span)
   setTimeout(() => span.remove(), 6200)
 }
@@ -223,7 +217,7 @@ async function connect() {
       for (const p of Array.isArray(parsed) ? parsed : [parsed]) {
         if (p.type === 106) {
           clock = { server: p.data.server_time_ms, local: performance.now() }
-          alignLiveClip()
+
           void sync()
         } else if (p.type === 107) {
           if (promoted) void connect()
@@ -288,7 +282,7 @@ $('compose').onsubmit = (e) => {
     data: {
       client_msg_id: crypto.randomUUID(),
       content: text,
-      video_offset_ms: Math.floor(video.currentTime * 1000),
+      video_offset_ms: mediaTime(),
     },
   }
   sendPending()
@@ -312,7 +306,7 @@ function wsOpen() {
 $('like').onclick = () => {
   if (wsOpen()) socket.send(JSON.stringify({ type: 103, data: { count: 1 } }))
 }
-async function loadReplay(start = Math.floor(video.currentTime * 1000)) {
+async function loadReplay(start = mediaTime()) {
   const generation = ++replayGeneration
   const until = start + 10000
   let from = start,
@@ -349,7 +343,7 @@ function firstEventAtOrAfter(events, ms, lo = 0) {
 }
 function drawReplay() {
   if (live || video.seeking || seekPending) return
-  const now = Math.floor(video.currentTime * 1000)
+  const now = mediaTime()
   if (sample) {
     const start = sample.index
     const end = firstEventAtOrAfter(sample.events, now + 1, start)
@@ -434,6 +428,9 @@ $('sample-files').onchange = async (event) => {
     $('sample-status').textContent =
       media.name + ' · ' + events.length + ' 条弹幕'
     video.loop = false
+    canvas.hidden = true
+    video.hidden = false
+    $('timeline').hidden = true
     video.src = sample.url
     video.play().catch(() => {})
   } catch {
@@ -447,12 +444,17 @@ function mode(isLive) {
   if (sample) {
     const previous = sample.url
     sample = null
-    video.src = demoSource
+    video.removeAttribute('src')
+    video.load()
+    video.hidden = true
+    canvas.hidden = false
     URL.revokeObjectURL(previous)
     $('sample-status').textContent = ''
     $('moderation-panel').hidden = false
   }
+  replayStart = performance.now()
   live = isLive
+  $('timeline').hidden = live
   replayGeneration++
   clear()
   controls()
@@ -464,11 +466,8 @@ function mode(isLive) {
   if (live) {
     cursor = ''
     socket?.close()
-    video.play().catch(() => {})
   } else {
-    video.currentTime = 0
     void loadReplay()
-    video.play().catch(() => {})
   }
 }
 $('live').onclick = () => {
@@ -477,8 +476,31 @@ $('live').onclick = () => {
 $('replay').onclick = () => {
   if (live || sample) mode(false)
 }
-video.loop = true
-video.play().catch(() => {})
+$('seek').oninput = (e) => {
+  const ms = Number(e.target.value)
+  replayStart = performance.now() - ms
+  clear()
+  void loadReplay(ms)
+}
+let previousTime = 0
+function drawClock() {
+  if (sample) return
+  const ms = mediaTime()
+  brush.fillStyle = '#10181c'
+  brush.fillRect(0, 0, canvas.width, canvas.height)
+  brush.fillStyle = '#f2f5f4'
+  brush.font = '64px monospace'
+  brush.textAlign = 'center'
+  brush.fillText('00:' + String(Math.floor(ms / 1000)).padStart(2, '0'), 480, 288)
+  if (!live) {
+    $('seek').value = ms
+    if (ms < previousTime) { clear(); void loadReplay(ms) }
+    else drawReplay()
+  }
+  previousTime = ms
+}
+setInterval(drawClock, 100)
+drawClock()
 void connect()
 
 $('moderation').onsubmit = async (e) => {
