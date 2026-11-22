@@ -2,6 +2,10 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: danmaku-gateway
+  - job_name: maku-gateway
     static_configs:
       - targets: ["host.docker.internal:8080"]
+  # 启用 Archiver 管理端口后，取消以下注释，并确保容器可访问该地址。
+  # - job_name: maku-archiver
+  #   static_configs:
+  #     - targets: ["host.docker.internal:9091"]

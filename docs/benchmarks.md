@@ -26,8 +26,8 @@
 go run ./cmd/bench fanout -viewers 160 -rate 800 -seconds 4 -legacy
 go run ./cmd/bench fanout -viewers 160 -rate 800 -seconds 4
 go run ./cmd/bench rooms
-go build -o /tmp/danmaku-gateway ./cmd/gateway
-go run ./cmd/bench migration -gateway /tmp/danmaku-gateway -viewers 24 -batch 4 -inflight 2
+go build -o /tmp/maku-gateway ./cmd/gateway
+go run ./cmd/bench migration -gateway /tmp/maku-gateway -viewers 24 -batch 4 -inflight 2
 ```
 
 ## 敏感词过滤
@@ -43,6 +43,24 @@ Apple M4，macOS arm64，Go 1.27.4。词库含 5,000 个不同的五字中文词
 
 ```sh
 go test -bench=. -benchmem ./internal/filter
+```
+
+## 移除网络 I/O 外层锁的前后对比
+
+基线为 `c38d848`。Apple M4、darwin/arm64、Go 1.27.4、Redis 7.4.12，每项运行三次，表内各指标独立取中位数。入退房使用同一房间和一个 Redis 分片，计时包括订阅、等待订阅确认和发送退订命令。本地扇出包含一个 worker 和每位观众的一次通道收发。
+
+| 操作 | 修改前 ns/op | 修改后 ns/op | 修改前 → 后 B/op | 修改前 → 后 allocs/op |
+|---|---:|---:|---:|---:|
+| Redis 房间入退订 | 219347 | 234308 | 2136 → 2519 | 52 → 57 |
+| 本地广播调度，100 人 | 67.44 | 66.86 | 104 → 104 | 2 → 2 |
+| 本地广播调度，10000 人 | 74.58 | 73.99 | 104 → 104 | 2 → 2 |
+| 本地完整扇出，10000 人 | 244783 | 236425 | 176 → 176 | 4 → 4 |
+
+要复现基线，将当前版本的 `BenchmarkRoomSubscription` 函数追加到基线的 `internal/pubsub/mux_test.go`（该文件已导入所需包）。启动独立的 Redis 7 实例，在两个版本分别执行以下命令。网络耗时会随 Redis 的部署方式与宿主机负载变化。
+
+```sh
+DANMAKU_TEST_REDIS_ADDR=127.0.0.1:6379 go test ./internal/pubsub -run '^$' -bench=. -benchmem -count=3
+go test ./internal/hub -run '^$' -bench=. -benchmem -count=3
 ```
 
 ## 直播弹幕批量归档
