@@ -2,6 +2,11 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
+	"strings"
+
+	"github.com/scthy/maku/internal/protocol"
 )
 
 // Start serializes membership changes. The room lock also protects snapshots
@@ -14,11 +19,14 @@ func (m *Hub) handleRegister(client *Client) {
 		client.Close()
 		return
 	}
+	var batch *roomBatch
+	var ctx context.Context
 	newRoom := m.rooms[room] == nil
 	if newRoom {
 		m.mu.Unlock()
-		ctx, cancel := context.WithCancel(m.life)
-		batch := &roomBatch{hub: m, room: room}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(m.life)
+		batch = &roomBatch{hub: m, room: room}
 		ready, err := m.mux.Subscribe(ctx, room, func(data []byte) { batch.push(ctx, data) })
 		if err != nil {
 			cancel()
@@ -44,6 +52,9 @@ func (m *Hub) handleRegister(client *Client) {
 	m.metrics.Membership(1, 0)
 	m.mu.Unlock()
 	if newRoom {
+		if id, ok := numericRoom(room); ok && m.liveBridge != nil {
+			m.liveBridge.Subscribe(room, id, func(msg protocol.LiveDanmaku) { batch.pushLive(ctx, msg) })
+		}
 		m.log.Info("Room subscription started", "room", room)
 	}
 	if client.registered != nil {
@@ -74,9 +85,41 @@ func (m *Hub) handleUnregister(client *Client) {
 	client.Close()
 	if cancel != nil {
 		cancel()
+		if _, ok := numericRoom(room); ok && m.liveBridge != nil {
+			m.liveBridge.Unsubscribe(room)
+		}
 		m.mux.Unsubscribe(m.life, room)
 		m.log.Info("Room subscription stopped", "room", room)
 	}
+}
+
+func numericRoom(room string) (uint64, bool) {
+	prefix, _, _ := strings.Cut(room, "/")
+	id, err := strconv.ParseUint(prefix, 10, 64)
+	return id, err == nil && id > 0
+}
+
+func (b *roomBatch) pushLive(ctx context.Context, msg protocol.LiveDanmaku) {
+	if f := b.hub.filter; f != nil {
+		if b.hub.maskWords {
+			msg.Content, _ = f.Mask(msg.Content, '*')
+		} else if f.Contains(msg.Content) {
+			return
+		}
+	}
+	msg.RoomID = b.room
+	msg.Source = "bilibili"
+	body, err := json.Marshal(msg)
+	if err != nil {
+		b.hub.log.Warn("Encode live danmaku", "error", err)
+		return
+	}
+	wire, err := json.Marshal(protocol.WsPacket{Type: protocol.TypeLiveDanmaku, RoomID: b.room, Data: body})
+	if err != nil {
+		b.hub.log.Warn("Encode live packet", "error", err)
+		return
+	}
+	b.push(ctx, wire)
 }
 
 func (m *Hub) roomSnapshot(roomID string) []*Client {

@@ -8,13 +8,14 @@ import (
 )
 
 const (
-	TypeDanmaku  = 101
-	TypeStats    = 102
-	TypeLike     = 103
-	TypeReceipt  = 104
-	TypeWithdraw = 105
-	TypeReady    = 106
-	TypeMigrate  = 107
+	TypeDanmaku     = 101
+	TypeStats       = 102
+	TypeLike        = 103
+	TypeReceipt     = 104
+	TypeWithdraw    = 105
+	TypeReady       = 106
+	TypeMigrate     = 107
+	TypeLiveDanmaku = 108
 )
 
 // WsPacket carries a typed payload and optional recovery cursors.
@@ -41,6 +42,17 @@ type DanmakuMessage struct {
 func (d DanmakuMessage) FitsHistory() bool {
 	return utf8.RuneCountInString(d.RoomID) <= 50 && utf8.RuneCountInString(d.Content) <= 500 &&
 		!strings.ContainsRune(d.RoomID, 0) && !strings.ContainsRune(d.Content, 0) && !strings.ContainsRune(d.EventID, 0)
+}
+
+// LiveDanmaku is an ephemeral upstream chat event.
+type LiveDanmaku struct {
+	EventID  string    `json:"event_id"`
+	RoomID   string    `json:"room_id"`
+	UserName string    `json:"user_name"`
+	Content  string    `json:"content"`
+	Color    string    `json:"color,omitempty"`
+	Source   string    `json:"source"`
+	SendTime time.Time `json:"send_time"`
 }
 
 type StatsData struct {

@@ -28,14 +28,27 @@ type roomStore interface {
 	SnapshotStats(context.Context, string, map[string]int, map[string]uint64, time.Duration) (map[string]protocol.StatsData, error)
 }
 
+type roomSubscriptions interface {
+	Subscribe(context.Context, string, func([]byte)) (<-chan struct{}, error)
+	Unsubscribe(context.Context, string)
+	Close()
+}
+
+type LiveBridge interface {
+	Subscribe(string, uint64, func(protocol.LiveDanmaku))
+	Unsubscribe(string)
+	Close()
+}
+
 type Hub struct {
-	log      *slog.Logger
-	producer *mq.Producer
-	life     context.Context
-	stop     context.CancelFunc
-	drainErr error
-	drained  chan struct{}
-	retiring atomic.Bool
+	liveBridge LiveBridge
+	log        *slog.Logger
+	producer   *mq.Producer
+	life       context.Context
+	stop       context.CancelFunc
+	drainErr   error
+	drained    chan struct{}
+	retiring   atomic.Bool
 
 	serverID string
 
@@ -43,7 +56,7 @@ type Hub struct {
 
 	unregister chan *Client
 
-	mux        *pubsub.Mux
+	mux        roomSubscriptions
 	shardSeed  maphash.Seed
 	ingress    sync.Mutex
 	publishing sync.WaitGroup
@@ -83,6 +96,7 @@ const (
 )
 
 type Config struct {
+	LiveBridge             LiveBridge
 	Logger                 *slog.Logger
 	Producer               *mq.Producer
 	Store                  *pubsub.Store
@@ -119,6 +133,7 @@ func New(cfg Config) *Hub {
 
 	life, cancel := context.WithCancel(context.Background())
 	m := &Hub{
+		liveBridge:     cfg.LiveBridge,
 		log:            cfg.Logger,
 		producer:       cfg.Producer,
 		metrics:        cfg.Metrics,
@@ -203,6 +218,9 @@ func (m *Hub) Drain(ctx context.Context) error {
 	m.publishing.Wait()
 	m.stop()
 	m.closeClients()
+	if m.liveBridge != nil {
+		m.liveBridge.Close()
+	}
 	m.mux.Close()
 	m.drainErr = m.producer.Drain(ctx)
 	close(m.drained)

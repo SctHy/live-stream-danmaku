@@ -57,9 +57,9 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /assets/protocol.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d;\n",
+		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d, liveDanmaku=%d;\n",
 			protocol.TypeDanmaku, protocol.TypeStats, protocol.TypeLike, protocol.TypeReceipt,
-			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate)
+			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate, protocol.TypeLiveDanmaku)
 	})
 	mux.Handle("GET /assets/", http.FileServerFS(web))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, assets, "web/index.html") })

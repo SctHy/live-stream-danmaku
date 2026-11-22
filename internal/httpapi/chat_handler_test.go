@@ -132,3 +132,11 @@ func TestRecoverAndOrigin(t *testing.T) {
 		t.Fatal(w.Code, string(raw))
 	}
 }
+
+func TestLiveDanmakuProtocolExport(t *testing.T) {
+	w := httptest.NewRecorder()
+	routes(&fakeStore{}).ServeHTTP(w, httptest.NewRequest("GET", "/assets/protocol.js", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "liveDanmaku=108") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

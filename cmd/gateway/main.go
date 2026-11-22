@@ -15,6 +15,7 @@ import (
 	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/httpapi"
 	"github.com/scthy/maku/internal/hub"
+	"github.com/scthy/maku/internal/livebridge"
 	"github.com/scthy/maku/internal/metrics"
 	"github.com/scthy/maku/internal/mq"
 	"github.com/scthy/maku/internal/pubsub"
@@ -38,6 +39,7 @@ func run() (code int) {
 	muxShards := flag.Int("pubsub-shards", 8, "Redis subscription connections")
 	wordFile := flag.String("sensitive-words", "", "dictionary file, one word per line")
 	mode := flag.String("filter-mode", "reject", "reject or mask matching messages")
+	bridgeEnabled := flag.Bool("bilibili-danmaku", true, "bridge real-time danmaku for numeric Bilibili rooms")
 	flag.Parse()
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	switch *format {
@@ -79,7 +81,12 @@ func run() (code int) {
 		log.Error("Kafka startup", "error", err)
 		return 1
 	}
+	var bridge hub.LiveBridge
+	if *bridgeEnabled {
+		bridge = livebridge.New(livebridge.Config{Logger: log})
+	}
 	m := hub.New(hub.Config{
+		LiveBridge:             bridge,
 		Logger:                 log,
 		Producer:               producer,
 		Store:                  sessions,
