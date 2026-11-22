@@ -45,6 +45,7 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /assets/", http.StripPrefix("/assets", http.FileServerFS(web)))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, assets, "web/index.html") })
 
+	mux.HandleFunc("GET /api/live/playurl", liveSource)
 	mux.HandleFunc("POST /api/session", h.session)
 	slug := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,24}$`)
 	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/rooms/{room}/{session}/live": h.live, "GET /api/rooms/{room}/{session}/recent": h.recent, "GET /api/rooms/{room}/{session}/playback": h.playback, "POST /api/rooms/{room}/{session}/moderate": h.moderate} {
