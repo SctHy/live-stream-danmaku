@@ -1,57 +1,94 @@
-本文件是本仓库的硬性工程规范。任何改动（新功能、重构、修 Bug）都必须严格遵守；若需求与下列约束冲突，先提出权衡，禁止擅自突破。
+# AGENTS.md — Maku
 
-## 1. 技术栈与依赖白名单
+本文件为在 **Maku** 仓库中协作的 AI 编程代理与开发者提供架构约定、工程约束与验证流程。修改代码前请先遵循以下规则。
 
-- **中间件栈固定**：Redis 7、Apache Kafka（KRaft）、PostgreSQL 17。不引入其他中间件。
-- **Go 直接依赖白名单**：
-  - 标准库：`net/http`（Go 1.22+ `ServeMux`）、`log/slog`、`embed`、`sync/atomic`
-  - 第三方：`github.com/gorilla/websocket`、`github.com/redis/go-redis/v9`、`github.com/twmb/franz-go`、`github.com/jackc/pgx/v5`、`github.com/prometheus/client_golang`
-- **禁止引入**：`gin`、`zap`、`sarama`、`viper`、任何 ORM、任何依赖注入框架、gRPC/Protobuf、重型规则/正则库。新增第三方依赖前必须先征得确认。
+## 1. 项目概览与模块边界
 
-## 2. 架构不变量（严禁破坏）
+**Maku** 是一个基于 Go 与轻量前端构建的高性能分布式实时弹幕推送引擎与异步归档系统，核心拆分为两个常驻进程与一套压测工具：
 
-1. **单一主链路**：所有弹幕上行必须经过同一条校验 → 过滤 → Redis 原子发布 → Kafka 异步归档流水线；禁止为 CLI/压测维护第二套并行内核。
-2. **零包级可变全局变量**：禁止全局 logger、全局 registry、全局 Prometheus `DefaultRegisterer` 或全局计数器。所有依赖（`*slog.Logger`、store、metrics、filter）通过构造函数显式注入。
-3. **Redis Cluster 兼容与高精度安全**：
-   - 所有单房间 Key 必须使用统一 Hash Tag `dm:{<room>}:*`，禁止在多 Key Lua 脚本中混入全局 Key。
-   - 禁止在 Lua 中用 `string.sub` 拼接 JSON，也禁止用 `cjson` 编解码 64 位 `user_id`（避免浮点精度丢失）；保持外层信封透传原始 JSON。
-4. **连接与并发红线**：
-   - Redis 订阅保持 $O(1)$ 固定分片多路复用（`internal/pubsub/mux.go`），禁止按房间新建独立连接。
-   - **严禁在持有 `sync.Mutex` / `sync.RWMutex` 期间执行网络 I/O**（Redis/Kafka/PG/Socket 读写）。
-   - 单连接保持帧数 + 字节双上限背压、连续 8 次入队失败踢出及 Ping/Pong 保活。
-5. **归档语义**：`cmd/archiver` 只做纯粹的 Kafka → PostgreSQL 分区批量幂等写（`UNNEST ... ON CONFLICT DO NOTHING`），事务成功后手动提交位点；瞬态错误指数退避，SQLSTATE `22`/`23` 毒丸逐条隔离，绝不阻塞分区。
-6. **低基数可观测性**：严禁把 `room_id`、`session`、`user_id` 作为 Prometheus Label。
+| 路径 | 职责 |
+|---|---|
+| `cmd/gateway/` | 网关入口：HTTP/WebSocket 服务、健康检查（`/livez`、`/readyz`）、Prometheus `/metrics`、敏感词 `SIGHUP` 热更新、优雅停机与滚动迁移 |
+| `cmd/archiver/` | 归档器入口：消费 Kafka 弹幕事件并按分区批量写入 PostgreSQL，可选独立暴露 `/metrics` |
+| `cmd/bench/` | 压测与验收工具：`fanout`（扇出与自适应合批）、`rooms`（冷热房隔离）、`migration`（双网关滚动交接） |
+| `internal/hub/` | 内存连接管理与广播核心：分片下行 worker（`RoomShards=32`）、成员不可变快照、自适应合批（`batcher.go`）、慢连接背压踢出、滚动迁移器（`migrator.go`） |
+| `internal/pubsub/` | Redis 交互层：Lua 脚本原子化校验/去重/限流/写恢复流/发布（`journal.go`）、共享订阅多路复用（`mux.go`）、在线人数与点赞统计（`stats.go`） |
+| `internal/mq/` | Kafka 生产与消费层：有界缓冲区异步投递（`producer.go`）、分区批量消费与带抖动指数退避重试（`consumer.go`、`retry.go`） |
+| `internal/store/` | PostgreSQL 存储层：内嵌 SQL 迁移（`migrations/*.sql` + `pg_advisory_xact_lock`）、`UNNEST` 批量幂等写入与撤回记录（`message_repo.go`） |
+| `internal/httpapi/` | HTTP/WebSocket 路由、`embed.FS` 内嵌前端资源、访客 HttpOnly Cookie 会话、B 站直播源解析（`live_source.go`）、房管接口（`history.go`） |
+| `internal/filter/` | 基于 Aho-Corasick 自动机的敏感词过滤引擎，支持 `reject` / `mask` 模式与原子热重载 |
+| `internal/protocol/` | WebSocket 信封（`WsPacket`）、消息体（`DanmakuMessage`）及 `danmaku.batch.v1` 子协议常量 |
+| `internal/metrics/` | 网关与归档器的 Prometheus 指标定义（严格控制标签基数） |
+| `frontend/` | Vite + TypeScript/React 源码（构建产物直接输出到 `internal/httpapi/web/`） |
+| `scripts/` | Node.js 端到端验证脚本（`check-migration.cjs`、`check-recovery.cjs`） |
 
-## 3. 反过度工程化规则（Anti-Slop）
+## 2. 核心设计约束（修改代码时不可破坏）
 
-- **做加法前先做减法**：替换旧实现时必须同步删除旧代码、旧 flag、旧表和旧测试，禁止以“向后兼容”名义保留死分支。
-- **禁止伪抽象**：
-  - 不建空壳 `service` 层；
-  - 不为单一实现定义 `interface`（仅在单测需要 mock 的最小边界定义）；
-  - 不为 2–3 个枚举分支引入全局注册表或策略工厂，直接用 `switch`；
-  - 不保留实测无效或默认关闭的实验性开关（如已删除的 `PreparedMessage`）。
-- **控制文件体量**：单个 Go 源文件尽量控制在 200 行以内，拒绝超过 300 行的上帝对象。
-- **不污染仓库**：不提交大体积二进制（视频/图片）、不把个人本机工具链写进仓库脚本、不为每次小改新建零散的 `.md` 报告或独立压测目录（压测统一收口在 `cmd/bench`）。
+1. **克制依赖与标准库优先**
+   - 保持现有 5 个核心直接依赖（`gorilla/websocket`、`go-redis/v9`、`franz-go`、`pgx/v5`、`prometheus/client_golang`）。
+   - HTTP 路由使用标准库 `net/http.ServeMux`，日志使用 `log/slog`，不要引入重型 Web 框架或 ORM。
+2. **协议与前端同步**
+   - `internal/protocol/message.go` 中的消息类型常量会由 `/assets/protocol.js` 动态导出给前端；新增或修改消息类型时，需同步检查 `internal/httpapi/chat_handler.go` 与 `frontend/src/room.js`。
+   - 修改 `frontend/` 下的任何文件后，必须执行 `cd frontend && npm ci && npm run build` 更新 `internal/httpapi/web/` 内嵌构建产物。
+3. **并发、幂等与精度边界**
+   - `user_id` 在 Go 侧为 `uint64`，PostgreSQL 侧为 `NUMERIC(20,0)`；广播信封需保留原始 JSON，避免 64 位整数在跨端序列化时丢失精度。
+   - 数据库迁移文件位于 `internal/store/migrations/`，按字典序递增编号，仅追加新迁移脚本，禁止修改已发布的旧迁移文件。
+   - 保持 Kafka 投递与 PostgreSQL `UNNEST` 归档的幂等语义（基于唯一 `event_id` 去重），处理完批次后再提交消费位点。
+4. **可观测性与安全性**
+   - Prometheus 指标标签只允许使用预定义的低基数枚举值（如模式、拒绝原因），禁止把 `room_id`、`user_id`、`event_id` 放入标签。
+   - 房管密钥校验必须使用 `crypto/subtle.ConstantTimeCompare`，并保持 `sameOrigin` 校验。
+   - 优雅停机流程必须维持：`SIGTERM` -> `/readyz` 返回 503 -> 分批发送迁移邀请 -> 关闭 HTTP 与连接 -> `Drain` 刷新 Kafka 缓冲区。
 
-## 4. 目录归属
+## 3. 代码规范与风格要求
 
-- `internal/protocol`：协议常量（`101`–`107`）与编解码，禁止在其他包散落魔法数字。
-- `internal/hub`：房间、连接、合批、迁移、上行路由。
-- `internal/pubsub`：Redis 复用订阅、单房间恢复流、统计聚合。
-- `internal/mq`：`franz-go` 生产者、分区消费者、退避与毒丸隔离。
-- `internal/store`：`pgxpool`、内嵌 SQL 迁移、回放与撤回查询。
-- `internal/filter`：零依赖 AC 自动机敏感词过滤与无锁热更新。
-- `internal/metrics`：独立 Prometheus Registry 与指标定义。
-- `internal/httpapi`：标准库 HTTP 路由、访客会话、轻量 Demo 静态页。
+- **Go 代码**：
+  - 提交前必须运行 `gofmt` 与 `go vet ./...`。
+  - 避免忽略关键 I/O、编码或关闭操作的错误返回值；测试文件遵循 `*_test.go`（纯单测）与 `*_integration_test.go`（依赖外部中间件）分离。
+- **前端代码**：
+  - 优先使用 TypeScript 严格模式（`tsconfig.json` 中 `strict: true`），避免继续扩大无类型 `.js` 文件的逻辑体积。
+  - 保持暗色极简视觉风格（深蓝灰基底 + 低饱和薄荷绿主色），新增控件需兼顾键盘焦点（`:focus-visible`）、响应式布局与 `prefers-reduced-motion`。
+- **文档与基准数据**：
+  - 任何性能数据或架构描述必须与 `docs/benchmarks.md` 和实际代码保持一致，不得编造未实测的数据。
 
-## 5. 交付前强制验收
+## 4. 常用开发与验证命令
 
-每次修改完成前必须全部运行并通过，禁止跳过：
+### 启动基础设施与服务
 
 ```sh
-go mod tidy
-go vet ./...
-go test -race ./...
+make up                  # 启动 Redis、PostgreSQL、Kafka
+make up-monitoring       # 额外启动 Prometheus（默认 127.0.0.1:9090）
+make run-archiver        # 启动归档器
+make run-gateway         # 启动网关（默认 127.0.0.1:8080）
 ```
 
-若改动涉及热路径（广播合批、Pub/Sub、敏感词过滤、批量落库），必须附带可复现的 `go test -bench=. -benchmem` 对比结果并同步更新 `docs/benchmarks.md` 与 `README.md`。
+### 测试与静态检查
+
+```sh
+gofmt -l .
+go vet ./...
+make test                # 等价于 go test -race ./...
+```
+
+### 集成测试环境变量
+
+```sh
+# 启用 Redis 与 PostgreSQL 集成测试
+DANMAKU_TEST_REDIS_ADDR=127.0.0.1:6379
+DANMAKU_TEST_DATABASE_URL=postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable
+
+# 启用双网关滚动迁移与房管集成测试
+DANMAKU_TEST_GATEWAY_A=http://127.0.0.1:8080
+DANMAKU_TEST_GATEWAY_B=http://127.0.0.1:8081
+DANMAKU_MOD_ROOM=retry
+DANMAKU_MOD_TOKEN=<your-token>
+```
+
+### 前端构建与压测验证
+
+```sh
+cd frontend && npm ci && npm run build
+make bench-fanout ARGS='-viewers 160 -rate 800 -seconds 4'
+go run ./cmd/bench rooms
+go build -o /tmp/maku-gateway ./cmd/gateway
+go run ./cmd/bench migration -gateway /tmp/maku-gateway -viewers 24
+```
