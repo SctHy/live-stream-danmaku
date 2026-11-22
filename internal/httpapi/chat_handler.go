@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
+	"fmt"
 	"encoding/json"
 	"io/fs"
 	"log/slog"
@@ -26,7 +27,7 @@ import (
 	"github.com/scthy/live-stream-danmaku/internal/store"
 )
 
-//go:embed web/*
+//go:embed all:web
 var assets embed.FS
 
 type ChatHandler struct {
@@ -42,7 +43,13 @@ func NewChatHandler(history *store.MessageRepo, m *hub.Hub, sessions *pubsub.Sto
 
 func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	web, _ := fs.Sub(assets, "web")
-	mux.Handle("GET /assets/", http.StripPrefix("/assets", http.FileServerFS(web)))
+	mux.HandleFunc("GET /assets/protocol.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d;\n",
+			protocol.TypeDanmaku, protocol.TypeStats, protocol.TypeLike, protocol.TypeReceipt,
+			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate)
+	})
+	mux.Handle("GET /assets/", http.FileServerFS(web))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, assets, "web/index.html") })
 
 	mux.HandleFunc("GET /api/live/playurl", liveSource)

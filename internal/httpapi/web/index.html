@@ -2,10 +2,10 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>弹幕放映室</title>
-    <link rel="stylesheet" href="/assets/style.css" />
-    <script type="module" src="/assets/app.js"></script>
+    <script type="module" crossorigin src="/assets/index-DAl_ujW3.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/_commonjsHelpers-CqkleIqs.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-DFKQK5w-.css">
   </head>
   <body>
     <header>
@@ -15,11 +15,10 @@
     <main>
       <form id="join">
         <label
-          >房间<input
+          >房间名或 B 站直播间号<input
             name="room"
             required
-            maxlength="24"
-            pattern="[a-zA-Z0-9_-]+" /></label
+            maxlength="24" pattern="[a-zA-Z0-9_-]+" /></label
         ><label
           >场次<input
             name="session"
@@ -31,37 +30,19 @@
       <div class="layout">
         <section>
           <div class="toolbar">
-            <div>
-              <button id="live" aria-pressed="true">直播</button
-              ><button id="replay" aria-pressed="false">回放</button>
-            </div>
             <span id="stats">在线 — · 赞 —</span>
           </div>
-          <details id="local-import">
-            <summary>本地样本</summary>
-            <label
-              >同时选择视频和弹幕 JSON
-              <input
-                id="sample-files"
-                type="file"
-                accept="video/*,.json"
-                multiple
-              />
-            </label>
-            <p id="sample-status" role="status"></p>
-          </details>
           <div class="screen">
-            <canvas id="clock" width="960" height="540" aria-label="放映计时"></canvas>
             <video hidden
               id="video"
               muted
-              playsinline
               controls
               preload="auto"
             ></video>
-            <div id="overlay" aria-hidden="true"></div>
+            <canvas id="overlay" aria-hidden="true"></canvas>
           </div>
-          <label id="timeline" hidden>回放进度 <input id="seek" type="range" min="0" max="59999" value="0" step="100"></label>
+          <div class="toolbar"><span id="source-status" role="status"></span><button id="fullscreen" type="button">全屏</button></div>
+          <div id="settings"></div>
           <form id="compose">
             <input
               id="message"

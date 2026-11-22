@@ -38,3 +38,4 @@ profile.out
 
 # --- 如果你以后用到 vendor 模式 ---
 vendor/
+/frontend/node_modules/

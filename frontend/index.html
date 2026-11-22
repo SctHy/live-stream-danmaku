@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>弹幕放映室</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <script type="module" src="/src/room.js"></script>
+  </head>
+  <body>
+    <header>
+      <a href="/">弹幕放映室</a
+      ><span id="connection" role="status">连接中</span>
+    </header>
+    <main>
+      <form id="join">
+        <label
+          >房间名或 B 站直播间号<input
+            name="room"
+            required
+            maxlength="24" pattern="[a-zA-Z0-9_-]+" /></label
+        ><label
+          >场次<input
+            name="session"
+            required
+            maxlength="24"
+            pattern="[a-zA-Z0-9_-]+" /></label
+        ><button>进入房间</button>
+      </form>
+      <div class="layout">
+        <section>
+          <div class="toolbar">
+            <span id="stats">在线 — · 赞 —</span>
+          </div>
+          <div class="screen">
+            <video hidden
+              id="video"
+              muted
+              controls
+              preload="auto"
+            ></video>
+            <canvas id="overlay" aria-hidden="true"></canvas>
+          </div>
+          <div class="toolbar"><span id="source-status" role="status"></span><button id="fullscreen" type="button">全屏</button></div>
+          <div id="settings"></div>
+          <form id="compose">
+            <input
+              id="message"
+              maxlength="500"
+              required
+              autocomplete="off"
+              aria-label="弹幕内容"
+              placeholder="写一条弹幕…"
+              disabled
+            /><button id="send" disabled>发送</button
+            ><button type="button" id="like" disabled>赞 +1</button>
+          </form>
+          <button type="button" id="retry" hidden>重试上一条</button>
+          <p id="feedback" role="status"></p>
+        </section>
+        <aside>
+          <h2 id="heading">实时弹幕</h2>
+          <ol id="messages"></ol>
+          <details id="moderation-panel">
+            <summary>房管操作</summary>
+            <form id="moderation">
+              <label
+                >房管密钥<input
+                  id="modKey"
+                  type="password"
+                  autocomplete="off"
+                  required /></label
+              ><label
+                >弹幕<select id="target" required>
+                  <option value="">选择一条弹幕</option>
+                </select></label
+              >
+              <div>
+                <button value="withdraw">撤回</button>
+                <button value="mute">禁言 60 秒</button>
+              </div>
+            </form>
+          </details>
+        </aside>
+      </div>
+    </main>
+  </body>
+</html>
