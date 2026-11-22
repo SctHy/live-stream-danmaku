@@ -4,7 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
-	"os"
+
 	"time"
 
 	"github.com/scthy/maku/internal/protocol"
@@ -20,9 +20,9 @@ func (h *ChatHandler) recent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 func (h *ChatHandler) moderate(w http.ResponseWriter, r *http.Request) {
-	key := os.Getenv("DANMAKU_MOD_TOKEN")
+	key := h.config.ModToken
 	room := roomID(r)
-	if !sameOrigin(r) || key == "" || os.Getenv("DANMAKU_MOD_ROOM") != r.PathValue("room") || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+key)) != 1 {
+	if !sameOrigin(r) || key == "" || h.config.ModRoom != r.PathValue("room") || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+key)) != 1 {
 		w.WriteHeader(403)
 		return
 	}

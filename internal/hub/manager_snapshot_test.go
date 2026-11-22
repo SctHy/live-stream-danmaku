@@ -9,7 +9,7 @@ func TestQueuedBroadcastKeepsOriginalMembers(t *testing.T) {
 	first := &Client{RoomID: "room"}
 	next := &Client{RoomID: "room"}
 	m := Hub{
-		Rooms:          map[string]map[*Client]struct{}{"room": {first: {}}},
+		rooms:          map[string]map[*Client]struct{}{"room": {first: {}}},
 		snapshots:      make(map[string][]*Client),
 		shardSeed:      maphash.MakeSeed(),
 		deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},

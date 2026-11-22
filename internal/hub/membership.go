@@ -14,8 +14,8 @@ func (m *Hub) handleRegister(client *Client) {
 		return
 	}
 
-	if _, ok := m.Rooms[client.RoomID]; !ok {
-		m.Rooms[client.RoomID] = make(map[*Client]struct{})
+	if _, ok := m.rooms[client.RoomID]; !ok {
+		m.rooms[client.RoomID] = make(map[*Client]struct{})
 
 		ctx, cancel := context.WithCancel(m.life)
 		m.cancelSub[client.RoomID] = cancel
@@ -24,7 +24,7 @@ func (m *Hub) handleRegister(client *Client) {
 		ready, err := m.mux.Subscribe(ctx, client.RoomID, func(data []byte) { batch.push(ctx, data) })
 		if err != nil {
 			cancel()
-			delete(m.Rooms, client.RoomID)
+			delete(m.rooms, client.RoomID)
 			delete(m.cancelSub, client.RoomID)
 			client.Close()
 			return
@@ -35,7 +35,7 @@ func (m *Hub) handleRegister(client *Client) {
 		m.log.Info("Room subscription started", "room", client.RoomID)
 	}
 
-	m.Rooms[client.RoomID][client] = struct{}{}
+	m.rooms[client.RoomID][client] = struct{}{}
 	m.metrics.Membership(1, 0)
 	delete(m.snapshots, client.RoomID)
 	client.subscription = m.ready[client.RoomID]
@@ -49,7 +49,7 @@ func (m *Hub) handleUnregister(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if clients, ok := m.Rooms[client.RoomID]; ok {
+	if clients, ok := m.rooms[client.RoomID]; ok {
 		if _, ok := clients[client]; ok {
 			delete(clients, client)
 			m.metrics.Membership(-1, 0)
@@ -58,7 +58,7 @@ func (m *Hub) handleUnregister(client *Client) {
 			client.Close()
 			if len(clients) == 0 {
 				m.metrics.Membership(0, -1)
-				delete(m.Rooms, client.RoomID)
+				delete(m.rooms, client.RoomID)
 				delete(m.ready, client.RoomID)
 				if cancel, exists := m.cancelSub[client.RoomID]; exists {
 					cancel()
@@ -85,7 +85,7 @@ func (m *Hub) roomSnapshot(roomID string) []*Client {
 	if snapshot = m.snapshots[roomID]; snapshot != nil {
 		return snapshot
 	}
-	clients := m.Rooms[roomID]
+	clients := m.rooms[roomID]
 	if len(clients) == 0 {
 		return nil
 	}
@@ -107,7 +107,7 @@ func (m *Hub) roomSnapshot(roomID string) []*Client {
 
 func (m *Hub) Join(ctx context.Context, c *Client) bool {
 	select {
-	case m.Register <- c:
+	case m.register <- c:
 		return true
 	case <-ctx.Done():
 		return false
@@ -117,7 +117,7 @@ func (m *Hub) Join(ctx context.Context, c *Client) bool {
 }
 func (m *Hub) Leave(c *Client) {
 	select {
-	case m.Unregister <- c:
+	case m.unregister <- c:
 	case <-m.life.Done():
 		c.Close()
 	}

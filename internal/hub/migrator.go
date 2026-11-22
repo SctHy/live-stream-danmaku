@@ -2,10 +2,12 @@ package hub
 
 import (
 	"context"
+	"fmt"
+	"github.com/scthy/maku/internal/protocol"
 	"time"
 )
 
-const migrationNotice = `{"type":107,"data":{}}`
+var migrationNotice = fmt.Sprintf(`{"type":%d,"data":{}}`, protocol.TypeMigrate)
 
 // Migrate marks the gateway unready before snapshotting membership. A notified
 // browser releases its old socket after syncing on the replacement gateway.
@@ -16,7 +18,7 @@ func (m *Hub) Migrate(ctx context.Context, batch, limit int, interval time.Durat
 		return
 	}
 	var waiting []*Client
-	for _, room := range m.Rooms {
+	for _, room := range m.rooms {
 		for c := range room {
 			if c.migration != nil {
 				waiting = append(waiting, c)

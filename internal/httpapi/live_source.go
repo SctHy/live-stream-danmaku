@@ -22,6 +22,7 @@ type liveFormat struct {
 	} `json:"codec"`
 }
 
+// liveSource resolves numeric Bilibili room IDs for the local screening-room demo.
 func liveSource(w http.ResponseWriter, r *http.Request) {
 	room, err := strconv.ParseUint(r.URL.Query().Get("room_id"), 10, 63)
 	if err != nil || room == 0 {

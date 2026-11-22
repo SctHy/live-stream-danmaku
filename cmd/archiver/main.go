@@ -30,7 +30,11 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
-	db, err := store.Open()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = store.DefaultDSN
+	}
+	db, err := store.Open(dsn)
 	if err != nil {
 		log.Error("PostgreSQL startup", "error", err)
 		os.Exit(1)

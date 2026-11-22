@@ -13,3 +13,15 @@ test:
 	go test -race ./...
 bench-fanout:
 	go run ./cmd/bench fanout $(ARGS)
+
+.PHONY: fmt vet build-frontend check
+fmt:
+	gofmt -w .
+vet:
+	go vet ./...
+build-frontend:
+	cd frontend && npm ci && npm run build
+check:
+	$(MAKE) fmt
+	$(MAKE) vet
+	$(MAKE) test

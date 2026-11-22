@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,19 +28,27 @@ import (
 //go:embed all:web
 var assets embed.FS
 
+type Config struct {
+	AllowDev          bool
+	ModRoom, ModToken string
+}
+
 type ChatHandler struct {
 	history  *store.MessageRepo
 	manager  *hub.Hub
 	sessions *pubsub.Store
-	allowDev bool
+	config   Config
 }
 
-func NewChatHandler(history *store.MessageRepo, m *hub.Hub, sessions *pubsub.Store, allowDev bool) *ChatHandler {
-	return &ChatHandler{history, m, sessions, allowDev}
+func NewChatHandler(history *store.MessageRepo, m *hub.Hub, sessions *pubsub.Store, config Config) *ChatHandler {
+	return &ChatHandler{history, m, sessions, config}
 }
 
 func (h *ChatHandler) Routes(mux *http.ServeMux) {
-	web, _ := fs.Sub(assets, "web")
+	web, err := fs.Sub(assets, "web")
+	if err != nil {
+		panic(err)
+	}
 	mux.HandleFunc("GET /assets/protocol.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d;\n",
@@ -78,7 +85,9 @@ func Recover(log *slog.Logger, next http.Handler) http.Handler {
 func roomID(r *http.Request) string { return r.PathValue("room") + "/" + r.PathValue("session") }
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("write JSON response", "error", err)
+	}
 }
 func loopback(remote string) bool {
 	host, _, err := net.SplitHostPort(remote)
@@ -128,7 +137,7 @@ func (h *ChatHandler) session(w http.ResponseWriter, r *http.Request) {
 }
 func (h *ChatHandler) live(w http.ResponseWriter, r *http.Request) {
 	uid, err := h.identity(r)
-	if err == redis.Nil && h.allowDev && loopback(r.RemoteAddr) && r.Header.Get("Origin") == "" {
+	if err == redis.Nil && h.config.AllowDev && loopback(r.RemoteAddr) && r.Header.Get("Origin") == "" {
 		uid, err = strconv.ParseUint(r.URL.Query().Get("uid"), 10, 64)
 	}
 	if err != nil {

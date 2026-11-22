@@ -36,7 +36,7 @@ func TestMixedFanoutAndBudget(t *testing.T) {
 
 func TestRoomBatchDrainsInOrder(t *testing.T) {
 	c := &Client{batch: true}
-	m := Hub{Rooms: map[string]map[*Client]struct{}{"r": {c: {}}}, snapshots: make(map[string][]*Client), BatchWindow: time.Hour, BatchArrivalGap: time.Second, shardSeed: maphash.MakeSeed(), deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 100)}}
+	m := Hub{rooms: map[string]map[*Client]struct{}{"r": {c: {}}}, snapshots: make(map[string][]*Client), BatchWindow: time.Hour, BatchArrivalGap: time.Second, shardSeed: maphash.MakeSeed(), deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 100)}}
 	in := make(chan []byte, 80)
 	for i := range 80 {
 		in <- []byte(string(rune('A' + i)))
@@ -81,7 +81,7 @@ func TestArrivalGapAndLocalViewerThreshold(t *testing.T) {
 			c := &Client{batch: true}
 			jobs := make(chan *BroadcastJob, 3)
 			m := Hub{
-				Rooms:           map[string]map[*Client]struct{}{"r": {c: {}}},
+				rooms:           map[string]map[*Client]struct{}{"r": {c: {}}},
 				snapshots:       make(map[string][]*Client),
 				deliveryQueues:  []chan *BroadcastJob{jobs},
 				shardSeed:       maphash.MakeSeed(),

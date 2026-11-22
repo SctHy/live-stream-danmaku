@@ -95,10 +95,10 @@ make run-gateway
 
 ### 前端构建
 
-前端源码位于 `frontend/`，修改后执行以下命令重新生成内嵌静态资源并重启网关：
+放映室由 `frontend/src/App.tsx` 渲染，`frontend/src/lib/roomClient.ts` 管理连接、游标补收与滚动迁移。修改前端后，执行以下命令重新生成内嵌静态资源，然后重启网关。
 
 ```sh
-cd frontend && npm ci && npm run build
+make build-frontend
 ```
 
 ## 核心机制说明

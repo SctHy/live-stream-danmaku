@@ -65,7 +65,11 @@ func main() {
 		}
 	}
 	telemetry := metrics.NewGatewayMetrics()
-	db, err := store.Open()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = store.DefaultDSN
+	}
+	db, err := store.Open(dsn)
 	if err != nil {
 		log.Error("PostgreSQL startup", "error", err)
 		os.Exit(1)
@@ -78,13 +82,18 @@ func main() {
 		log.Error("Kafka startup", "error", err)
 		os.Exit(1)
 	}
-	m := hub.New(log, producer, sessions, telemetry, words, *mode == "mask", *capacity, *shards, *muxShards)
+	cfg := hub.Config{Log: log, Producer: producer, Store: sessions, Metrics: telemetry,
+		MaskWords: *mode == "mask", SendCapacity: *capacity, Shards: *shards, MuxShards: *muxShards}
+	if words != nil {
+		cfg.Filter = words
+	}
+	m := hub.New(cfg)
 	m.BatchWindow = *window
 	m.BatchArrivalGap = *gap
 	m.MinBatchViewers = *minViewers
 	go m.Start()
 	r := http.NewServeMux()
-	httpapi.NewChatHandler(store.NewMessageRepo(db), m, sessions, *allowDev).Routes(r)
+	httpapi.NewChatHandler(store.NewMessageRepo(db), m, sessions, httpapi.Config{AllowDev: *allowDev, ModToken: os.Getenv("DANMAKU_MOD_TOKEN"), ModRoom: os.Getenv("DANMAKU_MOD_ROOM")}).Routes(r)
 	r.HandleFunc("GET /livez", func(w http.ResponseWriter, req *http.Request) { w.WriteHeader(200) })
 	r.HandleFunc("GET /readyz", func(w http.ResponseWriter, req *http.Request) {
 		if m.Retiring() {

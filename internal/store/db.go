@@ -4,7 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"os"
+
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,11 +14,9 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-func Open() (*pgxpool.Pool, error) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable"
-	}
+const DefaultDSN = "postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable"
+
+func Open(dsn string) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, dsn)

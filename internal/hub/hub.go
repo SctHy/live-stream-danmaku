@@ -9,9 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/metrics"
-	"github.com/scthy/maku/internal/mq"
 	"github.com/scthy/maku/internal/pubsub"
 )
 
@@ -23,7 +21,7 @@ type BroadcastJob struct {
 
 type Hub struct {
 	log       *slog.Logger
-	producer  *mq.Producer
+	producer  Publisher
 	life      context.Context
 	stop      context.CancelFunc
 	drainErr  error
@@ -32,14 +30,12 @@ type Hub struct {
 
 	ServerID string
 
-	Register chan *Client
-
-	Unregister chan *Client
-
-	mux       *pubsub.Mux
-	shardSeed maphash.Seed
-	ingress   sync.RWMutex
-	draining  bool
+	register   chan *Client
+	unregister chan *Client
+	mux        *pubsub.Mux
+	shardSeed  maphash.Seed
+	ingress    sync.RWMutex
+	draining   bool
 
 	started         chan struct{}
 	sendCapacity    int
@@ -47,19 +43,19 @@ type Hub struct {
 	MinBatchViewers int
 	BatchArrivalGap time.Duration
 	metrics         *metrics.GatewayMetrics
-	filter          *filter.Filter
+	filter          WordFilter
 	maskWords       bool
 	statsRunning    atomic.Bool
 	ready           map[string]<-chan struct{}
 	store           *pubsub.Store
 
-	Rooms map[string]map[*Client]struct{}
+	rooms map[string]map[*Client]struct{}
 
 	snapshots map[string][]*Client
 
 	cancelSub map[string]context.CancelFunc
 
-	mu sync.RWMutex // Protects the Rooms map
+	mu sync.RWMutex // Protects the rooms map
 
 	deliveryQueues []chan *BroadcastJob
 
@@ -74,39 +70,57 @@ const (
 	RoomShards           = 32
 )
 
-func New(log *slog.Logger, producer *mq.Producer, store *pubsub.Store, metrics *metrics.GatewayMetrics, words *filter.Filter, maskWords bool, sendCapacity, shards, muxShards int) *Hub {
+type Publisher interface {
+	Publish(string, []byte)
+	Drain(context.Context) error
+}
 
+type WordFilter interface {
+	Contains(string) bool
+	Mask(string, rune) (string, bool)
+}
+
+type Config struct {
+	Log                             *slog.Logger
+	Producer                        Publisher
+	Store                           *pubsub.Store
+	Metrics                         *metrics.GatewayMetrics
+	Filter                          WordFilter
+	MaskWords                       bool
+	SendCapacity, Shards, MuxShards int
+}
+
+func New(cfg Config) *Hub {
 	serverID := rand.Text()
 
 	life, cancel := context.WithCancel(context.Background())
 	m := &Hub{
-		log:            log,
-		producer:       producer,
-		metrics:        metrics,
-		filter:         words,
-		maskWords:      maskWords,
+		log:            cfg.Log,
+		producer:       cfg.Producer,
+		metrics:        cfg.Metrics,
+		filter:         cfg.Filter,
+		maskWords:      cfg.MaskWords,
 		life:           life,
 		stop:           cancel,
 		ServerID:       serverID,
 		started:        make(chan struct{}),
-		Register:       make(chan *Client),
-		Unregister:     make(chan *Client),
+		register:       make(chan *Client),
+		unregister:     make(chan *Client),
 		localLikes:     make(map[string]uint64),
-		Rooms:          make(map[string]map[*Client]struct{}),
+		rooms:          make(map[string]map[*Client]struct{}),
 		ready:          make(map[string]<-chan struct{}),
 		cancelSub:      make(map[string]context.CancelFunc),
 		snapshots:      make(map[string][]*Client),
-		mux:            store.Mux(life, muxShards),
-		deliveryQueues: make([]chan *BroadcastJob, shards),
-		sendCapacity:   sendCapacity,
-		store:          store,
+		mux:            cfg.Store.Mux(life, cfg.MuxShards),
+		deliveryQueues: make([]chan *BroadcastJob, cfg.Shards),
+		sendCapacity:   cfg.SendCapacity,
+		store:          cfg.Store,
 		shardSeed:      maphash.MakeSeed(),
 
 		BatchArrivalGap: DefaultBatchArrivalGap,
 	}
-	for i := range shards {
-
-		m.deliveryQueues[i] = make(chan *BroadcastJob, (BroadcastJobChanSize+shards-1)/shards)
+	for i := range cfg.Shards {
+		m.deliveryQueues[i] = make(chan *BroadcastJob, (BroadcastJobChanSize+cfg.Shards-1)/cfg.Shards)
 	}
 	return m
 }
@@ -122,9 +136,9 @@ func (m *Hub) Start() {
 		select {
 		case <-m.life.Done():
 			return
-		case client := <-m.Register:
+		case client := <-m.register:
 			m.handleRegister(client)
-		case client := <-m.Unregister:
+		case client := <-m.unregister:
 			m.handleUnregister(client)
 		case <-statsTicker.C:
 			if m.statsRunning.CompareAndSwap(false, true) {
@@ -137,7 +151,7 @@ func (m *Hub) Start() {
 func (m *Hub) CloseClients() {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, room := range m.Rooms {
+	for _, room := range m.rooms {
 		for c := range room {
 			c.Close()
 		}

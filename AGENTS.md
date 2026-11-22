@@ -28,7 +28,7 @@
    - 保持现有 5 个核心直接依赖（`gorilla/websocket`、`go-redis/v9`、`franz-go`、`pgx/v5`、`prometheus/client_golang`）。
    - HTTP 路由使用标准库 `net/http.ServeMux`，日志使用 `log/slog`，不要引入重型 Web 框架或 ORM。
 2. **协议与前端同步**
-   - `internal/protocol/message.go` 中的消息类型常量会由 `/assets/protocol.js` 动态导出给前端；新增或修改消息类型时，需同步检查 `internal/httpapi/chat_handler.go` 与 `frontend/src/room.js`。
+   - `internal/protocol/message.go` 中的消息类型常量会由 `/assets/protocol.js` 动态导出给前端；新增或修改消息类型时，需同步检查 `internal/httpapi/chat_handler.go`、`frontend/src/types/protocol.d.ts` 与 `frontend/src/lib/roomClient.ts`。
    - 修改 `frontend/` 下的任何文件后，必须执行 `cd frontend && npm ci && npm run build` 更新 `internal/httpapi/web/` 内嵌构建产物。
 3. **并发、幂等与精度边界**
    - `user_id` 在 Go 侧为 `uint64`，PostgreSQL 侧为 `NUMERIC(20,0)`；广播信封需保留原始 JSON，避免 64 位整数在跨端序列化时丢失精度。

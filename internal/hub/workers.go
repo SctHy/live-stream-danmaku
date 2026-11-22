@@ -35,14 +35,6 @@ func (m *Hub) broadcastWorker(queue <-chan *BroadcastJob) {
 
 }
 
-func (m *Hub) broadcastToLocalClients(roomID string, payload []byte) {
-	clients := m.roomSnapshot(roomID)
-	if len(clients) == 0 {
-		return
-	}
-	m.queueJob(roomID, &BroadcastJob{Clients: clients, Packets: [][]byte{payload}})
-}
-
 func (m *Hub) queueJob(roomID string, job *BroadcastJob) {
 	job.queued = time.Now()
 	select {

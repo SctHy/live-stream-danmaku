@@ -1,1 +1,13 @@
-{"compilerOptions":{"strict":true,"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","jsx":"react-jsx","allowJs":true,"skipLibCheck":true,"lib":["DOM","ES2022"]},"include":["src"]}
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "skipLibCheck": true,
+    "lib": ["DOM", "ES2022"]
+  },
+  "include": ["src"]
+}

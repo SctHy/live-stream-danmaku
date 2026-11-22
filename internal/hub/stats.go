@@ -17,7 +17,7 @@ func (m *Hub) broadcastStats() {
 
 	m.mu.RLock()
 	localStats := make(map[string]int)
-	for roomID, clients := range m.Rooms {
+	for roomID, clients := range m.rooms {
 		localStats[roomID] = len(clients)
 	}
 

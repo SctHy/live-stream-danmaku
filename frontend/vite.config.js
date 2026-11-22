@@ -1,2 +1,9 @@
-import {defineConfig} from 'vite'
-export default defineConfig({build:{target:'es2022',outDir:'../internal/httpapi/web',emptyOutDir:true,assetsDir:'assets'}})
+import { defineConfig } from "vite";
+export default defineConfig({
+  build: {
+    target: "es2022",
+    outDir: "../internal/httpapi/web",
+    emptyOutDir: true,
+    assetsDir: "assets",
+  },
+});
