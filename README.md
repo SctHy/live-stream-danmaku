@@ -1,6 +1,6 @@
 # Live Stream Danmaku
 
-Go 实时弹幕服务。同一房间、同一场次的观众可以跨网关收发弹幕和点赞。短时断线后，客户端按游标补收消息；观看回放时，按媒体时间查询历史弹幕。
+Go 实时弹幕服务。同一房间、同一场次的观众可以跨网关收发弹幕和点赞。短时断线后，客户端按游标补收消息。
 
 服务分为两个进程。网关负责 HTTP、WebSocket 和实时广播，归档器消费 Kafka 并批量写入 PostgreSQL。HTTP 路由和日志使用标准库 `net/http.ServeMux` 和 `log/slog`。五个直接依赖分别是 Gorilla WebSocket、go-redis、franz-go、pgx 和 Prometheus Go 客户端。
 
@@ -12,8 +12,10 @@ flowchart LR
     G -->|新接受的弹幕| K[Kafka KRaft]
     K --> A[Archiver]
     A -->|按分区批量写入| P[(PostgreSQL 17)]
-    G -->|回放、撤回| P
+    G -->|撤回| P
 ```
+
+每批 128 条直播弹幕的 PostgreSQL 归档基准中，清理前后每批分配从 74,600 B 降至 71,236 B，耗时中位数从 1.624 ms 变为 1.588 ms。[复现命令](docs/benchmarks.md#直播弹幕批量归档)
 
 ## 本地启动
 
@@ -26,7 +28,9 @@ make run-archiver
 make run-gateway
 ```
 
-打开 [本地放映室](http://127.0.0.1:8080/)。默认画面为 60 秒循环计时，可导入本地视频与弹幕 JSON 回放。用相同的房间名和场次打开第二个窗口，即可观察广播。
+打开 [本地放映室](http://127.0.0.1:8080/)。数字房间号会加载对应的 B 站直播间（默认 6），浏览器优先播放 FLV，失败时尝试 HLS。网关只解析播放地址，视频流量由 CDN 承载。普通房间名可直接用于实时弹幕互动。用相同的房间名和场次打开第二个窗口，即可观察广播。
+
+前端源文件在 `frontend/`，修改后运行 `cd frontend && npm ci && npm run build`，重新启动网关即可加载内嵌资源。弹幕设置支持字号、颜色、速度、透明度、显示区域和同屏上限。
 
 ## 一条弹幕如何送达
 

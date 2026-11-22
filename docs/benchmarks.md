@@ -44,3 +44,20 @@ Apple M4，macOS arm64，Go 1.27.4。词库含 5,000 个不同的五字中文词
 ```sh
 go test -bench=. -benchmem ./internal/filter
 ```
+
+## 直播弹幕批量归档
+
+Apple M4，本机 PostgreSQL 17，每批插入 128 条新消息，三轮各 100 批。下表取三轮中位数。
+
+| 批量写入 | ms/批 | B/批 | allocs/批 |
+|---|---:|---:|---:|
+| 清理前，6 个绑定数组 | 1.624 | 74,600 | 965 |
+| 直播归档，5 个绑定数组 | 1.588 | 71,236 | 961 |
+
+设置 `DANMAKU_TEST_DATABASE_URL` 指向可创建临时 schema 的 PostgreSQL 17 数据库，然后运行：
+
+```sh
+go test ./internal/store -run '^$' -bench=. -benchmem -benchtime=100x -count=3
+```
+
+对比旧版本时，将同一份 `internal/store/message_repo_bench_test.go` 放入清理前的源码。每轮使用独立 schema。

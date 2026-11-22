@@ -28,14 +28,13 @@ type WsPacket struct {
 
 // DanmakuMessage is a persisted event and the WebSocket chat payload.
 type DanmakuMessage struct {
-	VideoOffsetMS *int64    `json:"video_offset_ms,omitempty"`
-	ClientMsgID   string    `json:"client_msg_id,omitempty"`
-	EventID       string    `json:"event_id,omitempty"`
-	ID            uint64    `json:"id"`
-	RoomID        string    `json:"room_id"`
-	UserID        uint64    `json:"user_id"`
-	Content       string    `json:"content"`
-	SendTime      time.Time `json:"send_time"`
+	ClientMsgID string    `json:"client_msg_id,omitempty"`
+	EventID     string    `json:"event_id,omitempty"`
+	ID          uint64    `json:"id"`
+	RoomID      string    `json:"room_id"`
+	UserID      uint64    `json:"user_id"`
+	Content     string    `json:"content"`
+	SendTime    time.Time `json:"send_time"`
 }
 
 // FitsHistory checks the PostgreSQL text limits before publishing or batching.

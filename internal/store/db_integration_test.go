@@ -14,7 +14,7 @@ import (
 )
 
 // Every run gets its own schema, including its version ledger.
-func TestPostgresMigrationAndReplay(t *testing.T) {
+func TestPostgresMigrationAndArchive(t *testing.T) {
 	dsn := os.Getenv("DANMAKU_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("set DANMAKU_TEST_DATABASE_URL for PostgreSQL integration")
@@ -71,36 +71,23 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 					t.Fatal(err)
 				}
 			}
-			var replayed, preserved int
+			var archived, preserved int
 			err = pool.QueryRow(ctx, `SELECT
              count(*) FILTER (WHERE event_id='same' AND user_id=18446744073709551615 AND content='now'),
-             count(*) FILTER (WHERE event_id IS NULL AND content='legacy' AND video_offset_ms IS NULL)
-             FROM danmaku_messages WHERE room_id='x'`).Scan(&replayed, &preserved)
-			if err != nil || replayed != 1 || (legacy && preserved != 1) || (!legacy && preserved != 0) {
-				t.Fatalf("migration and replay: replayed=%d preserved=%d err=%v", replayed, preserved, err)
+             count(*) FILTER (WHERE event_id IS NULL AND content='legacy')
+             FROM danmaku_messages WHERE room_id='x'`).Scan(&archived, &preserved)
+			if err != nil || archived != 1 || (legacy && preserved != 1) || (!legacy && preserved != 0) {
+				t.Fatalf("migration and archive: archived=%d preserved=%d err=%v", archived, preserved, err)
 			}
-			offset := int64(1000)
-			for _, id := range []string{"visible", "hidden", "later"} {
-				if id == "hidden" {
-					if err := r.Withdraw(ctx, "x", id); err != nil {
-						t.Fatal(err)
-					}
-				}
-				msg := &protocol.DanmakuMessage{RoomID: "x", EventID: id, SendTime: time.Now(), VideoOffsetMS: &offset}
-				if _, err := r.SaveBatch(ctx, []*protocol.DanmakuMessage{msg}); err != nil {
-					t.Fatal(err)
-				}
+			if err := r.Withdraw(ctx, "x", "same"); err != nil {
+				t.Fatal(err)
 			}
-			page, err := r.Playback(ctx, "x", 1000, 1001, 0)
-			if err != nil || len(page) != 2 || page[0].EventID != "visible" {
-				t.Fatalf("playback %+v %v", page, err)
-			}
-			page, err = r.Playback(ctx, "x", 1000, 1001, int64(page[0].ID))
-			if err != nil || len(page) != 1 || page[0].EventID != "later" {
-				t.Fatal(page, err)
+			var recorded bool
+			if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM danmaku_withdrawals WHERE room_id='x' AND event_id='same')").Scan(&recorded); err != nil || !recorded {
+				t.Fatalf("withdrawal recorded=%v err=%v", recorded, err)
 			}
 			var versions int
-			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 2 {
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 3 {
 				t.Fatalf("ledger: %d %v", versions, err)
 			}
 		})

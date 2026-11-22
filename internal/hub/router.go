@@ -51,8 +51,7 @@ func (m *Hub) dispatch(c *Client, packet protocol.WsPacket) {
 func (m *Hub) handleDanmaku(c *Client, data []byte) {
 	var input protocol.DanmakuMessage
 	if json.Unmarshal(data, &input) != nil || !input.FitsHistory() ||
-		strings.TrimSpace(input.Content) == "" || len(input.ClientMsgID) > 80 ||
-		(input.VideoOffsetMS != nil && (*input.VideoOffsetMS < 0 || *input.VideoOffsetMS >= 86400000)) {
+		strings.TrimSpace(input.Content) == "" || len(input.ClientMsgID) > 80 {
 		m.reply(c, input.ClientMsgID, "invalid")
 		return
 	}
@@ -64,7 +63,7 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 			return
 		}
 	}
-	msg := protocol.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), VideoOffsetMS: input.VideoOffsetMS, ClientMsgID: input.ClientMsgID}
+	msg := protocol.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
 	body, _ := json.Marshal(msg)
 	packet := &protocol.WsPacket{Type: protocol.TypeDanmaku, RoomID: c.RoomID, Data: body}
 	m.ingress.RLock()

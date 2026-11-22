@@ -3,17 +3,16 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"embed"
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
+
 	"regexp"
 	"strconv"
 	"strings"
@@ -55,7 +54,7 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/live/playurl", liveSource)
 	mux.HandleFunc("POST /api/session", h.session)
 	slug := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,24}$`)
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/rooms/{room}/{session}/live": h.live, "GET /api/rooms/{room}/{session}/recent": h.recent, "GET /api/rooms/{room}/{session}/playback": h.playback, "POST /api/rooms/{room}/{session}/moderate": h.moderate} {
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/rooms/{room}/{session}/live": h.live, "GET /api/rooms/{room}/{session}/recent": h.recent, "POST /api/rooms/{room}/{session}/moderate": h.moderate} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			if !slug.MatchString(r.PathValue("room")) || !slug.MatchString(r.PathValue("session")) {
 				w.WriteHeader(400)
@@ -80,12 +79,6 @@ func roomID(r *http.Request) string { return r.PathValue("room") + "/" + r.PathV
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
-}
-func query(r *http.Request, key, fallback string) string {
-	if r.URL.Query().Has(key) {
-		return r.URL.Query().Get(key)
-	}
-	return fallback
 }
 func loopback(remote string) bool {
 	host, _, err := net.SplitHostPort(remote)
@@ -183,77 +176,4 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 
 	go client.WritePump()
 	client.ReadPump(h.manager)
-}
-func (h *ChatHandler) recent(w http.ResponseWriter, r *http.Request) {
-	out, err := h.sessions.Recover(r.Context(), roomID(r), r.URL.Query().Get("after"))
-	if err != nil {
-		w.WriteHeader(503)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, out)
-}
-func (h *ChatHandler) playback(w http.ResponseWriter, r *http.Request) {
-	from, e1 := strconv.ParseInt(query(r, "from", "0"), 10, 64)
-	until, e2 := strconv.ParseInt(query(r, "until", "86400000"), 10, 64)
-	after, e3 := strconv.ParseInt(query(r, "after", "0"), 10, 64)
-	if e1 != nil || e2 != nil || e3 != nil || from < 0 || until > 86400000 || from >= until || after < 0 {
-		w.WriteHeader(400)
-		return
-	}
-	rows, err := h.history.Playback(r.Context(), roomID(r), from, until, after)
-	if err != nil {
-		w.WriteHeader(503)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, map[string]any{"events": rows})
-}
-func (h *ChatHandler) moderate(w http.ResponseWriter, r *http.Request) {
-	key := os.Getenv("DANMAKU_MOD_TOKEN")
-	room := roomID(r)
-	if !sameOrigin(r) || key == "" || os.Getenv("DANMAKU_MOD_ROOM") != r.PathValue("room") || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+key)) != 1 {
-		w.WriteHeader(403)
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 2048)
-	var in struct {
-		Action  string
-		EventID string `json:"event_id"`
-		UserID  uint64 `json:"user_id"`
-		Seconds int
-	}
-	if json.NewDecoder(r.Body).Decode(&in) != nil {
-		w.WriteHeader(400)
-		return
-	}
-	ctx := r.Context()
-	var err error
-	switch in.Action {
-	case "mute":
-		if in.UserID == 0 || in.Seconds < 1 || in.Seconds > 86400 {
-			w.WriteHeader(400)
-			return
-		}
-		err = h.sessions.Mute(ctx, room, in.UserID, time.Duration(in.Seconds)*time.Second)
-	case "withdraw":
-		if len(in.EventID) < 26 || len(in.EventID) > 80 {
-			w.WriteHeader(400)
-			return
-		}
-		err = h.history.Withdraw(ctx, room, in.EventID)
-		if err == nil {
-			data, _ := json.Marshal(protocol.Withdraw{EventID: in.EventID})
-			packet, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeWithdraw, RoomID: room, Data: data})
-			err = h.sessions.Journal(ctx, room, packet)
-		}
-	default:
-		w.WriteHeader(400)
-		return
-	}
-	if err != nil {
-		w.WriteHeader(503)
-		return
-	}
-	w.WriteHeader(204)
 }

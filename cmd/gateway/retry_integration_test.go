@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/scthy/live-stream-danmaku/internal/protocol"
 )
 
@@ -43,7 +45,7 @@ func TestRetryAcrossGateways(t *testing.T) {
 		}
 		return conn
 	}
-	req := map[string]any{"type": protocol.TypeDanmaku, "data": map[string]any{"content": "retry", "video_offset_ms": 42, "client_msg_id": "retry-1"}}
+	req := map[string]any{"type": protocol.TypeDanmaku, "data": map[string]any{"content": "retry", "client_msg_id": "retry-1"}}
 	observer := dial(b)
 	defer observer.Close()
 	first := dial(a)
@@ -123,58 +125,67 @@ func TestRetryAcrossGateways(t *testing.T) {
 		t.Fatalf("recent events %d", n)
 	}
 	t.Log("12 retries returned original event; waiting for archive", original.Data.EventID)
-	until = time.Now().Add(2 * time.Minute)
-	for time.Now().Before(until) {
-		rows := read("/playback?from=0&until=100")
-		if len(rows) > 0 {
-			var row protocol.DanmakuMessage
-			if len(rows) != 1 || json.Unmarshal(rows[0], &row) != nil || row.EventID != original.Data.EventID {
-				t.Fatal("unexpected archive", rows)
-			}
-			if token := os.Getenv("DANMAKU_MOD_TOKEN"); token != "" && os.Getenv("DANMAKU_MOD_ROOM") == "retry" {
-				moderate := func(body any) {
-					data, _ := json.Marshal(body)
-					req, _ := http.NewRequest("POST", a+path+"/moderate", bytes.NewReader(data))
-					req.Header.Set("Authorization", "Bearer "+token)
-					resp, err := http.DefaultClient.Do(req)
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer resp.Body.Close()
-					if resp.StatusCode != 204 {
-						t.Fatal(resp.Status)
-					}
-				}
-				moderate(map[string]any{"action": "mute", "user_id": row.UserID, "seconds": 10})
-				muted := dial(b)
-				defer muted.Close()
-				req["data"] = map[string]any{"content": "blocked", "client_msg_id": "muted-test"}
-				if err := muted.WriteJSON(req); err != nil {
-					t.Fatal(err)
-				}
-				for {
-					var p protocol.WsPacket
-					if err := muted.ReadJSON(&p); err != nil {
-						t.Fatal(err)
-					}
-					if p.Type == protocol.TypeReceipt {
-						var receipt protocol.Receipt
-						if json.Unmarshal(p.Data, &receipt) != nil || receipt.Status != "muted" {
-							t.Fatal(string(p.Data))
-						}
-						break
-					}
-				}
-				moderate(map[string]any{"action": "withdraw", "event_id": row.EventID})
-				suffix := read("/recent?after=" + live.Position)
-				var withdrawal protocol.WsPacket
-				if len(suffix) != 1 || json.Unmarshal(suffix[0], &withdrawal) != nil || withdrawal.Type != protocol.TypeWithdraw || withdrawal.Previous != live.Position || len(read("/playback?from=0&until=100")) != 0 {
-					t.Fatal("withdrawal missing in recovery or playback")
-				}
-			}
-			return
+	if dsn := os.Getenv("DANMAKU_TEST_DATABASE_URL"); dsn != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		db, err := pgxpool.New(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(250 * time.Millisecond)
+		defer db.Close()
+		for {
+			var count int
+			if err := db.QueryRow(ctx, "SELECT count(*) FROM danmaku_messages WHERE event_id=$1", original.Data.EventID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count == 1 {
+				break
+			}
+			if count > 1 {
+				t.Fatalf("duplicate archive: %d", count)
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
 	}
-	t.Fatal("archive never recovered")
+	if token := os.Getenv("DANMAKU_MOD_TOKEN"); token != "" && os.Getenv("DANMAKU_MOD_ROOM") == "retry" {
+		moderate := func(body any) {
+			data, _ := json.Marshal(body)
+			req, _ := http.NewRequest("POST", a+path+"/moderate", bytes.NewReader(data))
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 204 {
+				t.Fatal(resp.Status)
+			}
+		}
+		moderate(map[string]any{"action": "mute", "user_id": original.Data.UserID, "seconds": 10})
+		muted := dial(b)
+		defer muted.Close()
+		req["data"] = map[string]any{"content": "blocked", "client_msg_id": "muted-test"}
+		if err := muted.WriteJSON(req); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			var p protocol.WsPacket
+			if err := muted.ReadJSON(&p); err != nil {
+				t.Fatal(err)
+			}
+			if p.Type == protocol.TypeReceipt {
+				var receipt protocol.Receipt
+				if json.Unmarshal(p.Data, &receipt) != nil || receipt.Status != "muted" {
+					t.Fatal(string(p.Data))
+				}
+				break
+			}
+		}
+		moderate(map[string]any{"action": "withdraw", "event_id": original.Data.EventID})
+		suffix := read("/recent?after=" + live.Position)
+		var withdrawal protocol.WsPacket
+		if len(suffix) != 1 || json.Unmarshal(suffix[0], &withdrawal) != nil || withdrawal.Type != protocol.TypeWithdraw || withdrawal.Previous != live.Position {
+			t.Fatal("withdrawal missing in recovery")
+		}
+	}
 }
