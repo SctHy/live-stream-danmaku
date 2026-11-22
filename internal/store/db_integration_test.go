@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 // Every run gets its own schema, including its version ledger.

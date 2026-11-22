@@ -1,4 +1,4 @@
-module github.com/scthy/live-stream-danmaku
+module github.com/scthy/maku
 
 go 1.27.4
 

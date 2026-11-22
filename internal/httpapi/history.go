@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 func (h *ChatHandler) recent(w http.ResponseWriter, r *http.Request) {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/metrics"
+	"github.com/scthy/maku/internal/metrics"
 )
 
 func TestMixedFanoutAndBudget(t *testing.T) {

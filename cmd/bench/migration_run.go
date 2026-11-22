@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 func (l *lab) launch(bin, addr string, flags ...string) (*os.Process, func()) {

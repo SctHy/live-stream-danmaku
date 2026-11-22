@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 // MessageRepo handles database operations for danmaku messages.

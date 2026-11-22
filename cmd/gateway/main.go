@@ -12,13 +12,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/filter"
-	"github.com/scthy/live-stream-danmaku/internal/httpapi"
-	"github.com/scthy/live-stream-danmaku/internal/hub"
-	"github.com/scthy/live-stream-danmaku/internal/metrics"
-	"github.com/scthy/live-stream-danmaku/internal/mq"
-	"github.com/scthy/live-stream-danmaku/internal/pubsub"
-	"github.com/scthy/live-stream-danmaku/internal/store"
+	"github.com/scthy/maku/internal/filter"
+	"github.com/scthy/maku/internal/httpapi"
+	"github.com/scthy/maku/internal/hub"
+	"github.com/scthy/maku/internal/metrics"
+	"github.com/scthy/maku/internal/mq"
+	"github.com/scthy/maku/internal/pubsub"
+	"github.com/scthy/maku/internal/store"
 )
 
 func main() {

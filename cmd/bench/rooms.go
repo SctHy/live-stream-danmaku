@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 type Msg struct {

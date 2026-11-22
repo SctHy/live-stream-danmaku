@@ -20,10 +20,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
-	"github.com/scthy/live-stream-danmaku/internal/hub"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
-	"github.com/scthy/live-stream-danmaku/internal/pubsub"
-	"github.com/scthy/live-stream-danmaku/internal/store"
+	"github.com/scthy/maku/internal/hub"
+	"github.com/scthy/maku/internal/protocol"
+	"github.com/scthy/maku/internal/pubsub"
+	"github.com/scthy/maku/internal/store"
 )
 
 //go:embed all:web

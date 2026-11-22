@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 func (m *Hub) reply(c *Client, id, status string) {

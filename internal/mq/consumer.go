@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/scthy/live-stream-danmaku/internal/metrics"
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/metrics"
+	"github.com/scthy/maku/internal/protocol"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 

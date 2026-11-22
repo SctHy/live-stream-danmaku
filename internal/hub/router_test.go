@@ -3,7 +3,7 @@ package hub
 import (
 	"testing"
 
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 func TestInvalidInputReturnsReceipt(t *testing.T) {

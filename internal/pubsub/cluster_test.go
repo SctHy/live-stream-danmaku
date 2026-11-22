@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 // Run with seed addresses from a Redis Cluster, reachable at their advertised addresses.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scthy/live-stream-danmaku/internal/protocol"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 func TestMigrationWaitsForOldConnectionOrDeadline(t *testing.T) {
