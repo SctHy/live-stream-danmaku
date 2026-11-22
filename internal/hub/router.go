@@ -17,8 +17,16 @@ func (m *Hub) receipt(c *Client, id, status, eventID string) {
 	if status != "accepted" {
 		m.metrics.Reject(status)
 	}
-	data, _ := json.Marshal(protocol.Receipt{ClientMsgID: id, Status: status, EventID: eventID})
-	wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeReceipt, Data: data})
+	data, err := json.Marshal(protocol.Receipt{ClientMsgID: id, Status: status, EventID: eventID})
+	if err != nil {
+		m.log.Error("Encode WebSocket packet", "error", err)
+		return
+	}
+	wire, err := json.Marshal(protocol.WsPacket{Type: protocol.TypeReceipt, Data: data})
+	if err != nil {
+		m.log.Error("Encode WebSocket packet", "error", err)
+		return
+	}
 	m.safeSend(c, m.frame(wire, 1))
 }
 
@@ -64,18 +72,29 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		}
 	}
 	msg := protocol.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
-	body, _ := json.Marshal(msg)
+	body, err := json.Marshal(msg)
+	if err != nil {
+		m.log.Error("Encode WebSocket packet", "error", err)
+		return
+	}
 	packet := &protocol.WsPacket{Type: protocol.TypeDanmaku, RoomID: c.RoomID, Data: body}
-	m.ingress.RLock()
-	defer m.ingress.RUnlock()
+	m.ingress.Lock()
 	if m.draining {
+		m.ingress.Unlock()
 		m.reply(c, input.ClientMsgID, "unavailable")
 		return
 	}
 
+	m.publishing.Add(1)
+	m.ingress.Unlock()
+	defer m.publishing.Done()
 	ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
 	defer cancel()
-	wire, _ := json.Marshal(packet)
+	wire, err := json.Marshal(packet)
+	if err != nil {
+		m.log.Error("Encode WebSocket packet", "error", err)
+		return
+	}
 	status, eventID, err := m.store.AcceptDanmaku(ctx, msg, wire)
 	if err != nil {
 		m.log.Warn("Redis publication failed", "error", err)

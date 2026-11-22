@@ -25,7 +25,7 @@ func (m *Hub) frame(payload []byte, count int) *outboundFrame {
 	return &outboundFrame{payload: payload, count: count}
 }
 
-func (m *Hub) deliver(job *BroadcastJob) {
+func (m *Hub) deliver(job *broadcastJob) {
 	var batch *outboundFrame
 	var singles []*outboundFrame
 	for _, c := range job.Clients {
@@ -53,7 +53,7 @@ func (m *Hub) safeSend(c *Client, f *outboundFrame) {
 	size := int64(len(f.payload))
 	if c.pendingBytes.Add(size) <= maxQueuedBytes {
 		select {
-		case c.Send <- f:
+		case c.send <- f:
 			c.consecutiveDrops.Store(0)
 			return
 		default:
@@ -72,7 +72,7 @@ type roomBatch struct {
 	room              string
 	mu                sync.Mutex
 	previous, expires time.Time
-	pending           *BroadcastJob
+	pending           *broadcastJob
 	timer             *time.Timer
 	size              int
 }
@@ -99,7 +99,7 @@ func (b *roomBatch) push(ctx context.Context, payload []byte) {
 	now := time.Now()
 	if !members[len(members)-1].batch {
 		split := sort.Search(len(members), func(i int) bool { return !members[i].batch })
-		b.hub.queueJob(b.room, &BroadcastJob{Clients: members[split:], Packets: [][]byte{payload}})
+		b.hub.queueJob(b.room, &broadcastJob{Clients: members[split:], Packets: [][]byte{payload}})
 		members = members[:split]
 		if len(members) == 0 {
 			b.flush()
@@ -109,18 +109,18 @@ func (b *roomBatch) push(ctx context.Context, payload []byte) {
 	if b.pending != nil && (!now.Before(b.expires) || &b.pending.Clients[0] != &members[0] || b.size+len(payload)+1 > maxBatchBytes) {
 		b.flush()
 	}
-	hot := now.Sub(b.previous) <= b.hub.BatchArrivalGap
+	hot := now.Sub(b.previous) <= b.hub.batchArrivalGap
 	b.previous = now
 	if b.pending == nil {
-		job := &BroadcastJob{Clients: members, Packets: [][]byte{payload}}
-		if !hot || len(members) < b.hub.MinBatchViewers || b.hub.BatchWindow == 0 || len(payload)+2 >= maxBatchBytes {
+		job := &broadcastJob{Clients: members, Packets: [][]byte{payload}}
+		if !hot || len(members) < b.hub.minBatchViewers || b.hub.batchWindow == 0 || len(payload)+2 >= maxBatchBytes {
 			b.hub.queueJob(b.room, job)
 			return
 		}
 		b.pending = job
 		b.size = len(payload) + 2
-		b.expires = now.Add(b.hub.BatchWindow)
-		b.timer = time.AfterFunc(b.hub.BatchWindow, func() {
+		b.expires = now.Add(b.hub.batchWindow)
+		b.timer = time.AfterFunc(b.hub.batchWindow, func() {
 			b.mu.Lock()
 			defer b.mu.Unlock()
 			if b.pending == job {

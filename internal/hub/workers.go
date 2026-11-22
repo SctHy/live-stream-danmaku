@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func (m *Hub) StartWorkers() {
+func (m *Hub) startWorkers() {
 	for _, q := range m.deliveryQueues {
 		go m.broadcastWorker(q)
 	}
@@ -15,7 +15,7 @@ func (m *Hub) roomShard(room string) int {
 	return int(maphash.String(m.shardSeed, room) % uint64(len(m.deliveryQueues)))
 }
 
-func (m *Hub) broadcastWorker(queue <-chan *BroadcastJob) {
+func (m *Hub) broadcastWorker(queue <-chan *broadcastJob) {
 	var stopped <-chan struct{}
 	if m.life != nil {
 		stopped = m.life.Done()
@@ -40,10 +40,10 @@ func (m *Hub) broadcastToLocalClients(roomID string, payload []byte) {
 	if len(clients) == 0 {
 		return
 	}
-	m.queueJob(roomID, &BroadcastJob{Clients: clients, Packets: [][]byte{payload}})
+	m.queueJob(roomID, &broadcastJob{Clients: clients, Packets: [][]byte{payload}})
 }
 
-func (m *Hub) queueJob(roomID string, job *BroadcastJob) {
+func (m *Hub) queueJob(roomID string, job *broadcastJob) {
 	job.queued = time.Now()
 	select {
 	case m.deliveryQueues[m.roomShard(roomID)] <- job:

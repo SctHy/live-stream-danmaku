@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 func TestHundredRoomsShareEightConnections(t *testing.T) {
@@ -92,7 +93,7 @@ func TestShardReconnectRestoresRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	for {
-		err := r.Publish(ctx, fmt.Sprintf(KeyRoomPubSub, name), `{"pos":"new","prev":"old","packet":{"type":102,"data":{}}}`).Err()
+		err := r.Publish(ctx, fmt.Sprintf(KeyRoomPubSub, name), fmt.Sprintf(`{"pos":"new","prev":"old","packet":{"type":%d,"data":{}}}`, protocol.TypeStats)).Err()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,5 +104,31 @@ func TestShardReconnectRestoresRoom(t *testing.T) {
 			t.Fatal("lost subscription after reconnect")
 		case <-time.After(25 * time.Millisecond):
 		}
+	}
+}
+
+func BenchmarkRoomSubscription(b *testing.B) {
+	addr := os.Getenv("DANMAKU_TEST_REDIS_ADDR")
+	if addr == "" {
+		b.Skip("requires Redis")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := Open(addr)
+	defer store.Close()
+	mux := store.Mux(ctx, 1)
+	defer mux.Close()
+	room := "bench/" + rand.Text()
+	for b.Loop() {
+		ready, err := mux.Subscribe(ctx, room, func([]byte) {})
+		if err != nil {
+			b.Fatal(err)
+		}
+		select {
+		case <-ready:
+		case <-time.After(5 * time.Second):
+			b.Fatal("subscription acknowledgement timed out")
+		}
+		mux.Unsubscribe(ctx, room)
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+
 	"net"
 	"net/http"
 	"sort"
@@ -41,31 +41,31 @@ func dial(addr, room string, batch bool) *websocket.Conn {
 
 	response, err := http.Post("http://"+addr+"/api/session", "application/json", nil)
 	if err != nil {
-		log.Fatal(err)
+		fatalf("%v", err)
 	}
 	io.Copy(io.Discard, response.Body)
 	response.Body.Close()
 	cookies := response.Cookies()
 	if response.StatusCode != 200 || len(cookies) == 0 {
-		log.Fatal("guest session unavailable")
+		fatalf("guest session unavailable")
 	}
 	headers.Set("Cookie", cookies[0].Name+"="+cookies[0].Value)
 
 	conn, _, err := dialer.Dial("ws://"+addr+path, headers)
 	if err != nil {
-		log.Fatal(err)
+		fatalf("%v", err)
 	}
 	// Keep completed loopback runs from consuming the ephemeral port range in TIME_WAIT.
 	if tcp, ok := conn.UnderlyingConn().(*net.TCPConn); ok {
 		if err := tcp.SetLinger(0); err != nil {
-			log.Fatal(err)
+			fatalf("%v", err)
 		}
 	}
 
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var ready protocol.WsPacket
 	if err := conn.ReadJSON(&ready); err != nil || ready.Type != protocol.TypeReady {
-		log.Fatalf("subscription failed: %v", err)
+		fatalf("subscription failed: %v", err)
 	}
 	conn.SetReadDeadline(time.Time{})
 
@@ -101,7 +101,7 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 			now := time.Now().UnixMicro()
 			packets, err := protocol.DecodePackets(data)
 			if err != nil {
-				log.Fatal(err)
+				fatalf("%v", err)
 			}
 			n := 0
 			for _, p := range packets {
@@ -109,17 +109,17 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 					continue
 				}
 				if p.RoomID != expectedRoom {
-					log.Fatalf("unexpected room %q for viewer in %q", p.RoomID, expectedRoom)
+					fatalf("unexpected room %q for viewer in %q", p.RoomID, expectedRoom)
 				}
 				n++
 				var d struct{ Content string }
 				if err := json.Unmarshal(p.Data, &d); err != nil {
-					log.Fatal(err)
+					fatalf("%v", err)
 				}
 				prefix, stamp, ok := strings.Cut(d.Content, "/")
 				seq, err := strconv.Atoi(prefix)
 				if !ok || err != nil || seq < 0 || seq >= expected {
-					log.Fatalf("unexpected sequence %q", d.Content)
+					fatalf("unexpected sequence %q", d.Content)
 				}
 				o.record(seq)
 
@@ -131,7 +131,7 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 				if sample {
 					sent, err := strconv.ParseInt(stamp, 10, 64)
 					if err != nil {
-						log.Fatal(err)
+						fatalf("%v", err)
 					}
 					o.latency = append(o.latency, now-sent)
 				}
@@ -152,7 +152,7 @@ func send(writers []*observer, n, rate int) {
 		time.Sleep(time.Until(start.Add(time.Second * time.Duration(i) / time.Duration(rate))))
 		data := fmt.Appendf(nil, `{"type":%d,"data":{"content":"%d/%d"}}`, protocol.TypeDanmaku, i, time.Now().UnixMicro())
 		if err := writers[i%len(writers)].conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			log.Fatal(err)
+			fatalf("%v", err)
 		}
 	}
 }

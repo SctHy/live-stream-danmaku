@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"sync"
@@ -75,7 +74,7 @@ func rooms(args []string) {
 			for j := 0; j < 20; j++ {
 				e := pubs[i].WriteMessage(1, fmt.Appendf(nil, `{"type":%d,"data":{"content":"hot"}}`, protocol.TypeDanmaku))
 				if e != nil {
-					panic(e)
+					fatalf("%v", e)
 				}
 				time.Sleep(time.Until(t.Add(time.Duration(j+1) * 200 * time.Millisecond)))
 			}
@@ -84,7 +83,7 @@ func rooms(args []string) {
 	t := time.Now()
 	for i := 0; i < 20; i++ {
 		if err := c.WriteMessage(1, []byte(fmt.Sprintf(`{"type":%d,"data":{"content":"%d"}}`, protocol.TypeDanmaku, time.Now().UnixMicro()))); err != nil {
-			log.Fatal(err)
+			fatalf("%v", err)
 		}
 		time.Sleep(time.Until(t.Add(time.Duration(i+1) * 200 * time.Millisecond)))
 	}
@@ -99,7 +98,7 @@ func rooms(args []string) {
 	done.Wait()
 	sort.Slice(sample, func(i, j int) bool { return sample[i] < sample[j] })
 	if len(sample) != 20 || hot.Load() != 640 {
-		log.Fatal("incomplete room delivery", len(sample), hot.Load())
+		fatalf("incomplete room delivery: cold=%d hot=%d", len(sample), hot.Load())
 	}
 	fmt.Printf("cold=%d/20 hot=%d/640 P50=%dus P99=%dus\n", len(sample), hot.Load(), sample[len(sample)/2], sample[(len(sample)*99-1)/100])
 }

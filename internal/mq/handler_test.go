@@ -36,7 +36,7 @@ func TestClaimReplaysUnconfirmedBatch(t *testing.T) {
 		cancel()
 		return errors.New("connection lost before acknowledgement")
 	})
-	err := archivePartition(ctx, store, slog.Default(), nil, records, commit)
+	err := archivePartition(ctx, store, slog.New(slog.DiscardHandler), nil, records, commit)
 	if !errors.Is(err, context.Canceled) || len(marked) != 0 {
 		t.Fatalf("err=%v marked=%v", err, marked)
 	}
@@ -50,7 +50,7 @@ func TestClaimReplaysUnconfirmedBatch(t *testing.T) {
 		}
 		return nil
 	}
-	if err := archivePartition(ctx, store, slog.Default(), nil, records, commit); err != nil {
+	if err := archivePartition(ctx, store, slog.New(slog.DiscardHandler), nil, records, commit); err != nil {
 		t.Fatal(err)
 	}
 	if len(marked) != 1 || marked[0] != 11 {
@@ -75,7 +75,7 @@ func TestConstraintFailureIsolated(t *testing.T) {
 		historyRecord(t, 12, protocol.DanmakuMessage{EventID: "last"}),
 	}
 	var offset int64
-	err := archivePartition(context.Background(), store, slog.Default(), nil, records, func(_ context.Context, rs ...*kgo.Record) error { offset = rs[0].Offset; return nil })
+	err := archivePartition(context.Background(), store, slog.New(slog.DiscardHandler), nil, records, func(_ context.Context, rs ...*kgo.Record) error { offset = rs[0].Offset; return nil })
 	if err != nil || offset != 12 || strings.Join(saved, ",") != "first,last" {
 		t.Fatal(err, offset, saved)
 	}
@@ -91,4 +91,19 @@ func historyRecord(t *testing.T, offset int64, msg protocol.DanmakuMessage) *kgo
 		t.Fatal(err)
 	}
 	return &kgo.Record{Topic: "history", Partition: 1, Offset: offset, Value: packet}
+}
+
+func TestCommitAfterShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	store := writeBatch(func(context.Context, []*protocol.DanmakuMessage) error { cancel(); return nil })
+	committed := false
+	err := archivePartition(ctx, store, slog.Default(), nil, []*kgo.Record{historyRecord(t, 4, protocol.DanmakuMessage{EventID: "stored"})}, func(ctx context.Context, rs ...*kgo.Record) error {
+		_, bounded := ctx.Deadline()
+		committed = bounded && ctx.Err() == nil && rs[0].Offset == 4
+		return ctx.Err()
+	})
+	if err != nil || !committed {
+		t.Fatal(committed, err)
+	}
 }

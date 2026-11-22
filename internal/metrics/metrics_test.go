@@ -42,3 +42,16 @@ func TestGatewayExposition(t *testing.T) {
 		t.Fatal("shared registry")
 	}
 }
+
+func TestArchiveExposition(t *testing.T) {
+	m := NewArchiveMetrics()
+	m.Batch(4, time.Second)
+	m.DeadLetter()
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	for _, sample := range []string{"danmaku_archive_written_total 4", "danmaku_archive_deadletter_total 1", "danmaku_archive_batch_duration_seconds_count 1", "danmaku_archive_batch_duration_seconds_sum 1"} {
+		if !strings.Contains(w.Body.String(), "\n"+sample+"\n") {
+			t.Error(sample)
+		}
+	}
+}

@@ -17,7 +17,7 @@ func (m *Hub) broadcastStats() {
 
 	m.mu.RLock()
 	localStats := make(map[string]int)
-	for roomID, clients := range m.Rooms {
+	for roomID, clients := range m.rooms {
 		localStats[roomID] = len(clients)
 	}
 
@@ -30,16 +30,31 @@ func (m *Hub) broadcastStats() {
 	}
 	chunk := make(map[string]int, 128)
 	flush := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(m.life, 2*time.Second)
 		defer cancel()
-		stats, err := m.store.SnapshotStats(ctx, m.ServerID, chunk, currentBatchLikes, statsInterval*2+time.Second)
+		stats, err := m.store.SnapshotStats(ctx, m.serverID, chunk, currentBatchLikes, statsInterval*2+time.Second)
 		if err != nil {
+			m.likesMu.Lock()
+			for room := range chunk {
+				if n := currentBatchLikes[room]; n > 0 {
+					m.localLikes[room] += n
+				}
+			}
+			m.likesMu.Unlock()
 			m.log.Warn("Room statistics unavailable", "error", err)
 			return
 		}
 		for room, s := range stats {
-			data, _ := json.Marshal(s)
-			wire, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeStats, RoomID: room, Data: data})
+			data, err := json.Marshal(s)
+			if err != nil {
+				m.log.Error("Encode WebSocket packet", "error", err)
+				continue
+			}
+			wire, err := json.Marshal(protocol.WsPacket{Type: protocol.TypeStats, RoomID: room, Data: data})
+			if err != nil {
+				m.log.Error("Encode WebSocket packet", "error", err)
+				continue
+			}
 			frame := m.frame(wire, 1)
 			for _, client := range m.roomSnapshot(room) {
 				client.setStats(frame)

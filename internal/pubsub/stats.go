@@ -11,17 +11,20 @@ import (
 	"github.com/scthy/maku/internal/protocol"
 )
 
-// SnapshotStats batches network round trips across rooms. Callers bound each chunk.
+// SnapshotStats batches reads and writes for a bounded chunk of rooms. It removes
+// acknowledged increments from likes, including when a later command fails.
 func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[string]int, likes map[string]uint64, ttl time.Duration) (map[string]protocol.StatsData, error) {
 	r := s.r
 	p := r.Pipeline()
+	optional := make(map[redis.Cmder]bool)
+	increments := make(map[string]*redis.IntCmd)
 	owners := make(map[string]*redis.StringSliceCmd)
 	counts := make(map[string]*redis.StringCmd)
 	tails := make(map[string]*redis.XMessageSliceCmd)
 	for room, n := range rooms {
 		key := fmt.Sprintf(KeyRoomLikes, room)
 		if delta := likes[room]; delta > 0 {
-			p.IncrBy(ctx, key, int64(delta))
+			increments[room] = p.IncrBy(ctx, key, int64(delta))
 		}
 		if n == 0 {
 			continue
@@ -32,11 +35,24 @@ func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[stri
 		p.Expire(ctx, registry, ttl*2)
 		owners[room] = p.SMembers(ctx, registry)
 		counts[room] = p.Get(ctx, key)
+		optional[counts[room]] = true
 		if strings.Contains(room, "/") {
 			tails[room] = p.XRevRangeN(ctx, "dm:{"+room+"}:recent", "+", "-", 1)
 		}
 	}
-	if _, err := p.Exec(ctx); err != nil && err != redis.Nil {
+	cmds, execErr := p.Exec(ctx)
+	// Remove acknowledged increments so callers only requeue unconfirmed likes.
+	for room, cmd := range increments {
+		if cmd.Err() == nil {
+			delete(likes, room)
+		}
+	}
+	for _, cmd := range cmds {
+		if err := cmd.Err(); err != nil && !(optional[cmd] && err == redis.Nil) {
+			return nil, err
+		}
+	}
+	if err := execErr; err != nil && err != redis.Nil {
 		return nil, err
 	}
 	online := make(map[string]*redis.SliceCmd)
@@ -52,24 +68,62 @@ func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[stri
 	if _, err := p.Exec(ctx); err != nil {
 		return nil, err
 	}
+	type staleOwner struct {
+		keys   []string
+		server string
+		cmd    *redis.Cmd
+	}
+	var stale []staleOwner
 	out := make(map[string]protocol.StatsData, len(online))
 	for room, cmd := range online {
-		var s protocol.StatsData
-		s.Likes, _ = counts[room].Uint64()
+		var stats protocol.StatsData
+		if counts[room].Err() == nil {
+			var err error
+			stats.Likes, err = counts[room].Uint64()
+			if err != nil {
+				return nil, err
+			}
+		}
 		for i, v := range cmd.Val() {
 			if raw, ok := v.(string); ok {
-				n, _ := strconv.ParseUint(raw, 10, 64)
-				s.Online += n
+				n, err := strconv.ParseUint(raw, 10, 64)
+				if err != nil {
+					return nil, err
+				}
+				stats.Online += n
 			} else {
 				id := owners[room].Val()[i]
-				p.Eval(ctx, "if redis.call('exists',KEYS[1])==0 then return redis.call('srem',KEYS[2],ARGV[1]) end", []string{fmt.Sprintf(KeyRoomServerOnline, room, id), fmt.Sprintf(KeyServerOfRoom, room)}, id)
+				keys := []string{fmt.Sprintf(KeyRoomServerOnline, room, id), fmt.Sprintf(KeyServerOfRoom, room)}
+				stale = append(stale, staleOwner{keys, id, s.cleanup.EvalSha(ctx, p, keys, id)})
 			}
 		}
 		if tail := tails[room]; tail != nil && len(tail.Val()) > 0 {
-			s.Position = StreamPosition(tail.Val()[0])
+			stats.Position = StreamPosition(tail.Val()[0])
 		}
-		out[room] = s
+		out[room] = stats
 	}
-	_, err := p.Exec(ctx)
-	return out, err
+	if _, err := p.Exec(ctx); err != nil {
+		if !redis.HasErrorPrefix(err, "NOSCRIPT") {
+			return nil, err
+		}
+		// A cluster node may not have seen the script yet. Retry only its misses.
+		for _, owner := range stale {
+			switch err := owner.cmd.Err(); {
+			case redis.HasErrorPrefix(err, "NOSCRIPT"):
+				s.cleanup.Eval(ctx, p, owner.keys, owner.server)
+			case err != nil:
+				return nil, err
+			}
+		}
+		if _, err := p.Exec(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
+
+const removeExpiredServerLua = `
+if redis.call('exists', KEYS[1]) == 0 then
+ return redis.call('srem', KEYS[2], ARGV[1])
+end
+return 0`

@@ -4,7 +4,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/scthy/maku/internal/protocol"
@@ -53,8 +55,15 @@ func (h *ChatHandler) moderate(w http.ResponseWriter, r *http.Request) {
 		}
 		err = h.history.Withdraw(ctx, room, in.EventID)
 		if err == nil {
-			data, _ := json.Marshal(protocol.Withdraw{EventID: in.EventID})
-			packet, _ := json.Marshal(protocol.WsPacket{Type: protocol.TypeWithdraw, RoomID: room, Data: data})
+			var data, packet []byte
+			data, err = json.Marshal(protocol.Withdraw{EventID: in.EventID})
+			if err != nil {
+				break
+			}
+			packet, err = json.Marshal(protocol.WsPacket{Type: protocol.TypeWithdraw, RoomID: room, Data: data})
+			if err != nil {
+				break
+			}
 			err = h.sessions.Journal(ctx, room, packet)
 		}
 	default:
@@ -66,4 +75,42 @@ func (h *ChatHandler) moderate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+func (h *ChatHandler) listHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		w.WriteHeader(400)
+		return
+	}
+	var before uint64
+	limit := 50
+	if q.Has("before_id") {
+		before, err = strconv.ParseUint(q.Get("before_id"), 10, 64)
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+	}
+	if q.Has("limit") {
+		limit, err = strconv.Atoi(q.Get("limit"))
+		if err != nil || limit < 1 || limit > 100 {
+			w.WriteHeader(400)
+			return
+		}
+	}
+	msgs, more, err := h.history.ListHistory(r.Context(), roomID(r), before, limit)
+	if err != nil {
+		w.WriteHeader(503)
+		return
+	}
+	if msgs == nil {
+		msgs = []protocol.DanmakuMessage{}
+	}
+	var next uint64
+	if more && len(msgs) > 0 {
+		next = msgs[len(msgs)-1].ID
+	}
+	writeJSON(w, map[string]any{"messages": msgs, "has_more": more, "next_before_id": next})
 }

@@ -17,8 +17,8 @@ const (
 )
 
 type Store struct {
-	r                                     redis.UniversalClient
-	appendEvent, acceptEvent, allowAction *redis.Script
+	r                                              redis.UniversalClient
+	appendEvent, acceptEvent, allowAction, cleanup *redis.Script
 }
 
 func Open(addr string) *Store {
@@ -41,5 +41,8 @@ func (s *Store) Mute(ctx context.Context, room string, uid uint64, ttl time.Dura
 func (s *Store) Mux(ctx context.Context, n int) *Mux { return NewMux(ctx, s.r, n) }
 
 func newStore(r redis.UniversalClient) *Store {
-	return &Store{r, redis.NewScript(appendEventLua), redis.NewScript(acceptEventLua), redis.NewScript(allowActionLua)}
+	return &Store{r: r,
+		appendEvent: redis.NewScript(appendEventLua), acceptEvent: redis.NewScript(acceptEventLua),
+		allowAction: redis.NewScript(allowActionLua), cleanup: redis.NewScript(removeExpiredServerLua),
+	}
 }

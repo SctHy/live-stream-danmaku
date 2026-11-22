@@ -82,12 +82,30 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 			if err := r.Withdraw(ctx, "x", "same"); err != nil {
 				t.Fatal(err)
 			}
+			// Insert a newer visible message after the withdrawal, then verify both cursor pages.
+			for _, id := range []string{"older", "newer"} {
+				_, err := r.SaveBatch(ctx, []*protocol.DanmakuMessage{{EventID: id, RoomID: "x", Content: id, UserID: ^uint64(0), SendTime: time.Now()}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			first, more, err := r.ListHistory(ctx, "x", ^uint64(0), 1)
+			if err != nil || !more || len(first) != 1 || first[0].EventID != "newer" || first[0].UserID != ^uint64(0) {
+				t.Fatal(first, more, err)
+			}
+			rest, more, err := r.ListHistory(ctx, "x", first[0].ID, 100)
+			if err != nil || more || len(rest) != 1+preserved || rest[0].EventID != "older" || rest[0].ID >= first[0].ID {
+				t.Fatal(rest, more, err)
+			}
+			if legacy && (rest[1].EventID != "" || rest[1].Content != "legacy") {
+				t.Fatal(rest)
+			}
 			var recorded bool
 			if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM danmaku_withdrawals WHERE room_id='x' AND event_id='same')").Scan(&recorded); err != nil || !recorded {
 				t.Fatalf("withdrawal recorded=%v err=%v", recorded, err)
 			}
 			var versions int
-			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 3 {
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 4 {
 				t.Fatalf("ledger: %d %v", versions, err)
 			}
 		})

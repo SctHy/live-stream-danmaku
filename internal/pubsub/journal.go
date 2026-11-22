@@ -128,7 +128,10 @@ func (s *Store) Recover(ctx context.Context, room, after string) (Recovery, erro
 			}
 			if hidden[ref.EventID] {
 				p.Type = protocol.TypeWithdraw
-				p.Data, _ = json.Marshal(ref)
+				p.Data, err = json.Marshal(ref)
+				if err != nil {
+					return out, err
+				}
 			}
 		}
 	}

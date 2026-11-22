@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"time"
 
@@ -49,4 +50,40 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 func (r *MessageRepo) Withdraw(ctx context.Context, room, id string) error {
 	_, err := r.db.Exec(ctx, "INSERT INTO danmaku_withdrawals(room_id,event_id) VALUES($1,$2) ON CONFLICT DO NOTHING", room, id)
 	return err
+}
+
+func (r *MessageRepo) ListHistory(ctx context.Context, room string, beforeID uint64, limit int) ([]protocol.DanmakuMessage, bool, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	limit = min(limit, 100)
+	// Every BIGSERIAL ID is below a cursor outside the signed range.
+	if beforeID > math.MaxInt64 {
+		beforeID = 0
+	}
+	rows, err := r.db.Query(ctx, `SELECT m.id,coalesce(m.event_id,''),m.room_id,m.user_id::text,m.content,m.send_time
+ FROM danmaku_messages m WHERE m.room_id=$1 AND ($2::bigint=0 OR m.id<$2)
+ AND NOT EXISTS (SELECT 1 FROM danmaku_withdrawals w WHERE w.room_id=m.room_id AND w.event_id=m.event_id)
+ ORDER BY m.id DESC LIMIT $3`, room, int64(beforeID), limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	out := make([]protocol.DanmakuMessage, 0, limit+1)
+	for rows.Next() {
+		var m protocol.DanmakuMessage
+		var uid string
+		if err := rows.Scan(&m.ID, &m.EventID, &m.RoomID, &uid, &m.Content, &m.SendTime); err != nil {
+			return nil, false, err
+		}
+		m.UserID, err = strconv.ParseUint(uid, 10, 64)
+		if err != nil {
+			return nil, false, err
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	return out[:min(limit, len(out))], len(out) > limit, nil
 }

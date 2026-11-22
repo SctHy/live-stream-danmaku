@@ -14,9 +14,9 @@ func BenchmarkBroadcastDispatch(b *testing.B) {
 				members[new(Client)] = struct{}{}
 			}
 			m := Hub{
-				Rooms:          map[string]map[*Client]struct{}{"room": members},
+				rooms:          map[string]map[*Client]struct{}{"room": members},
 				shardSeed:      maphash.MakeSeed(),
-				deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},
+				deliveryQueues: []chan *broadcastJob{make(chan *broadcastJob, 1)},
 			}
 			m.snapshots = make(map[string][]*Client)
 			payload := []byte("benchmark")
@@ -39,14 +39,14 @@ func BenchmarkRoomFanout(b *testing.B) {
 	members := make(map[*Client]struct{}, size)
 	clients := make([]*Client, 0, size)
 	for i := 0; i < size; i++ {
-		client := &Client{Send: make(chan *outboundFrame, 1)}
+		client := &Client{send: make(chan *outboundFrame, 1)}
 		members[client] = struct{}{}
 		clients = append(clients, client)
 	}
 	m := Hub{
-		Rooms:          map[string]map[*Client]struct{}{"room": members},
+		rooms:          map[string]map[*Client]struct{}{"room": members},
 		shardSeed:      maphash.MakeSeed(),
-		deliveryQueues: []chan *BroadcastJob{make(chan *BroadcastJob, 1)},
+		deliveryQueues: []chan *broadcastJob{make(chan *broadcastJob, 1)},
 	}
 	m.snapshots = make(map[string][]*Client)
 	go m.broadcastWorker(m.deliveryQueues[0])
@@ -57,7 +57,7 @@ func BenchmarkRoomFanout(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		m.broadcastToLocalClients("room", payload)
 		for _, client := range clients {
-			f := <-client.Send
+			f := <-client.send
 			client.pendingBytes.Add(-int64(len(f.payload)))
 		}
 	}

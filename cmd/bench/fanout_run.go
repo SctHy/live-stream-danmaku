@@ -4,7 +4,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+
 	"net"
 	"strconv"
 	"strings"
@@ -40,14 +40,14 @@ func fanout(args []string) {
 		*peer = *addr
 	}
 	if *mixed < 0 || *stalled < 0 || *rooms < 0 || *churn < 0 {
-		log.Fatal("negative workload parameter")
+		fatalf("negative workload parameter")
 	}
 	if *viewers < 1 || *rate < 1 || *seconds < 1 || *drain <= 0 {
-		log.Fatal("positive load parameters required")
+		fatalf("positive load parameters required")
 	}
 	tag := strconv.FormatInt(time.Now().UnixNano(), 36)
 	if *rate > *viewers*7 {
-		log.Fatal("increase viewers for the configured per-guest send rate")
+		fatalf("increase viewers for the configured per-guest send rate")
 	}
 	n := *rate * *seconds
 	coldRate := 5
@@ -151,6 +151,6 @@ func fanout(args []string) {
 	}
 	fmt.Printf("viewers=%d target_rate=%d achieved_rate=%.2f seconds=%d received=%d expected=%d frames=%d payload_bytes=%d missing=%d duplicates=%d cursor_gaps=%d affected=%d worst_missing=%d hot_p99_us=%d cold_p99_us=%d cold_received=%d cold_unique=%d\n", *viewers, *rate, float64(n)/(sendElapsed.Seconds()+1/float64(*rate)), *seconds, total, expected, frames, payloadBytes, missing, duplicate, gaps, affected, worst, percentile(hot[0].latency, 99), percentile(cold.latency, 99), cold.received.Load(), cold.unique)
 	if affected > 0 || cold.unique != coldCount || cold.duplicates > 0 || cold.gaps > 0 {
-		log.Fatal("delivery verification failed")
+		fatalf("delivery verification failed")
 	}
 }

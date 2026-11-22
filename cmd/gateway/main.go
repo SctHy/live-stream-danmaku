@@ -21,7 +21,8 @@ import (
 	"github.com/scthy/maku/internal/store"
 )
 
-func main() {
+func main() { os.Exit(run()) }
+func run() (code int) {
 	format := flag.String("log-format", "json", "text or json")
 	host := flag.String("host", "127.0.0.1", "listen address")
 	port := flag.String("port", "8080", "HTTP port")
@@ -45,15 +46,15 @@ func main() {
 	case "json":
 	default:
 		flag.Usage()
-		os.Exit(2)
+		return 2
 	}
 	if *muxShards < 1 || *migrationTimeout < 0 || *migrationBatch < 1 || *migrationLimit < 0 || *shards < 1 || *shards > 256 || *capacity < 1 || *window < 0 || *minViewers < 1 || *gap < 0 {
 		log.Error("invalid gateway configuration")
-		os.Exit(2)
+		return 2
 	}
 	if *mode != "reject" && *mode != "mask" {
 		log.Error("invalid filter mode", "mode", *mode)
-		os.Exit(2)
+		return 2
 	}
 	var words *filter.Filter
 	if *wordFile != "" {
@@ -61,14 +62,14 @@ func main() {
 		words, err = filter.LoadFile(*wordFile)
 		if err != nil {
 			log.Error("Load sensitive words", "error", err)
-			os.Exit(1)
+			return 1
 		}
 	}
 	telemetry := metrics.NewGatewayMetrics()
 	db, err := store.Open()
 	if err != nil {
 		log.Error("PostgreSQL startup", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	defer db.Close()
 	sessions := pubsub.Open(os.Getenv("REDIS_ADDR"))
@@ -76,12 +77,23 @@ func main() {
 	producer, err := mq.NewProducer(mq.Brokers(os.Getenv("KAFKA_BROKERS")), log, telemetry)
 	if err != nil {
 		log.Error("Kafka startup", "error", err)
-		os.Exit(1)
+		return 1
 	}
-	m := hub.New(log, producer, sessions, telemetry, words, *mode == "mask", *capacity, *shards, *muxShards)
-	m.BatchWindow = *window
-	m.BatchArrivalGap = *gap
-	m.MinBatchViewers = *minViewers
+	m := hub.New(hub.Config{
+		Logger:                 log,
+		Producer:               producer,
+		Store:                  sessions,
+		Metrics:                telemetry,
+		Filter:                 words,
+		MaskWords:              *mode == "mask",
+		SendCapacity:           *capacity,
+		RoomShards:             *shards,
+		PubSubShards:           *muxShards,
+		BatchWindow:            *window,
+		BatchArrivalGap:        *gap,
+		DisableArrivalBatching: *gap == 0,
+		MinBatchViewers:        *minViewers,
+	})
 	go m.Start()
 	r := http.NewServeMux()
 	httpapi.NewChatHandler(store.NewMessageRepo(db), m, sessions, *allowDev).Routes(r)
@@ -130,18 +142,22 @@ func main() {
 	case err := <-done:
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Error("HTTP listener", "error", err)
-			os.Exit(1)
+			code = 1
 		}
 	case <-ctx.Done():
 		migration, finish := context.WithTimeout(context.Background(), *migrationTimeout)
 		m.Migrate(migration, *migrationBatch, *migrationLimit, 100*time.Millisecond)
 		finish()
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		srv.Shutdown(shutdown)
-		if err := m.Drain(shutdown); err != nil {
-			log.Error("Drain timed out", "error", err)
-			os.Exit(1)
-		}
 	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdown); err != nil {
+		log.Error("HTTP shutdown", "error", err)
+		code = 1
+	}
+	if err := m.Drain(shutdown); err != nil {
+		log.Error("Drain timed out", "error", err)
+		return 1
+	}
+	return code
 }

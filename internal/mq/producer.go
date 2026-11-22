@@ -22,6 +22,8 @@ func NewProducer(brokers []string, log *slog.Logger, metrics *metrics.GatewayMet
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.AllowAutoTopicCreation(),
+		// Leader acknowledgements reduce latency and require disabling Kafka idempotence.
+		// PostgreSQL deduplicates archive retries with ON CONFLICT (event_id) DO NOTHING.
 		kgo.DisableIdempotentWrite(),
 		kgo.RequiredAcks(kgo.LeaderAck()),
 		kgo.ProducerBatchCompression(kgo.SnappyCompression()),

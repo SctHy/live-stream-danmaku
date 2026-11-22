@@ -2,7 +2,9 @@ package hub
 
 import (
 	"encoding/json"
-	"io"
+	"errors"
+	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,11 +35,10 @@ type Client struct {
 	Socket       *websocket.Conn // the websocket connection that the server holds for each client
 	batch        bool
 	pendingBytes atomic.Int64
-	Send         chan *outboundFrame // a channel to send messages to the client
+	send         chan *outboundFrame // a channel to send messages to the client
 	// done is used to signal the goroutines to stop
-	done chan struct{}
-	// once ensures that the Close operations are only performed once
-	once sync.Once
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func (m *Hub) NewClient(uid uint64, room string, conn *websocket.Conn) *Client {
@@ -49,7 +50,7 @@ func (m *Hub) NewClient(uid uint64, room string, conn *websocket.Conn) *Client {
 
 		RoomID: room,
 		Socket: conn,
-		Send:   make(chan *outboundFrame, m.sendCapacity),
+		send:   make(chan *outboundFrame, m.sendCapacity),
 		done:   make(chan struct{}),
 	}
 }
@@ -58,14 +59,10 @@ func (m *Hub) NewClient(uid uint64, room string, conn *websocket.Conn) *Client {
 func (c *Client) EnableMigration() { c.migration = make(chan struct{}, 1) }
 
 func (c *Client) ReadPump(manager *Hub) {
-	defer func() {
-
-		manager.Leave(c)
-		c.Socket.Close()
-	}()
-
 	c.Socket.SetReadLimit(8192)
-	c.Socket.SetReadDeadline(time.Now().Add(PongWait))
+	if err := c.Socket.SetReadDeadline(time.Now().Add(PongWait)); err != nil {
+		return
+	}
 	c.Socket.SetPongHandler(func(string) error { return c.Socket.SetReadDeadline(time.Now().Add(PongWait)) })
 	for {
 
@@ -95,13 +92,16 @@ func (c *Client) ReadPump(manager *Hub) {
 }
 
 func (c *Client) WritePump() {
-	defer func() {
-		c.Socket.Close()
-	}()
+	defer c.Close()
 
 	ping := time.NewTicker(PingPeriod)
 	defer ping.Stop()
 	for {
+		select {
+		case <-c.done:
+			return
+		default:
+		}
 		var message *outboundFrame
 		var chat bool
 		select {
@@ -112,24 +112,21 @@ func (c *Client) WritePump() {
 				return
 			}
 			continue
-		case message = <-c.Send:
+		case message = <-c.send:
 			chat = true
 		case <-c.migration:
-			c.Socket.SetWriteDeadline(time.Now().Add(WriteWait))
-			w, err := c.Socket.NextWriter(websocket.TextMessage)
-			if err != nil {
+			if err := c.Socket.SetWriteDeadline(time.Now().Add(WriteWait)); err != nil {
 				return
 			}
-			if _, err = io.WriteString(w, migrationNotice); err != nil {
-				return
-			}
-			if err = w.Close(); err != nil {
+			if err := c.Socket.WriteJSON(protocol.WsPacket{Type: protocol.TypeMigrate, Data: json.RawMessage("{}")}); err != nil {
 				return
 			}
 			continue
 		case message = <-c.stats:
 		}
-		c.Socket.SetWriteDeadline(time.Now().Add(WriteWait))
+		if err := c.Socket.SetWriteDeadline(time.Now().Add(WriteWait)); err != nil {
+			return
+		}
 		err := c.Socket.WriteMessage(websocket.TextMessage, message.payload)
 		if chat {
 			c.pendingBytes.Add(-int64(len(message.payload)))
@@ -161,20 +158,18 @@ func (c *Client) setStats(frame *outboundFrame) {
 }
 
 // Close gracefully closes the client connection and signals goroutines to exit.
-// It is idempotent thanks to sync.Once.
 func (c *Client) Close()     { c.close(false) }
 func (c *Client) closeSlow() { c.close(true) }
 func (c *Client) close(slow bool) {
-	c.once.Do(func() {
+	c.closeOnce.Do(func() {
 		if slow {
 			c.metrics.Kick()
 		}
-
 		close(c.done)
-
 		if c.Socket != nil {
-			c.Socket.Close()
+			if err := c.Socket.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				slog.Warn("Close WebSocket", "error", err)
+			}
 		}
-
 	})
 }

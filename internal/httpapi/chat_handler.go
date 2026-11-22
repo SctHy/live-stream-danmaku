@@ -12,8 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -23,25 +23,38 @@ import (
 	"github.com/scthy/maku/internal/hub"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
-	"github.com/scthy/maku/internal/store"
 )
 
 //go:embed all:web
 var assets embed.FS
 
+type HistoryStore interface {
+	ListHistory(context.Context, string, uint64, int) ([]protocol.DanmakuMessage, bool, error)
+	Withdraw(context.Context, string, string) error
+}
+type sessionStore interface {
+	Guest(context.Context, string) (uint64, error)
+	SaveGuest(context.Context, string, uint64, time.Duration) error
+	Mute(context.Context, string, uint64, time.Duration) error
+	Recover(context.Context, string, string) (pubsub.Recovery, error)
+	Journal(context.Context, string, []byte) error
+}
 type ChatHandler struct {
-	history  *store.MessageRepo
+	history  HistoryStore
 	manager  *hub.Hub
-	sessions *pubsub.Store
+	sessions sessionStore
 	allowDev bool
 }
 
-func NewChatHandler(history *store.MessageRepo, m *hub.Hub, sessions *pubsub.Store, allowDev bool) *ChatHandler {
+func NewChatHandler(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool) *ChatHandler {
 	return &ChatHandler{history, m, sessions, allowDev}
 }
 
 func (h *ChatHandler) Routes(mux *http.ServeMux) {
-	web, _ := fs.Sub(assets, "web")
+	web, err := fs.Sub(assets, "web")
+	if err != nil {
+		panic(err)
+	}
 	mux.HandleFunc("GET /assets/protocol.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d;\n",
@@ -51,10 +64,10 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /assets/", http.FileServerFS(web))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, assets, "web/index.html") })
 
-	mux.HandleFunc("GET /api/live/playurl", liveSource)
+	mux.HandleFunc("GET /api/live/playurl", newLiveResolver("https://api.live.bilibili.com", nil).serve)
 	mux.HandleFunc("POST /api/session", h.session)
 	slug := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,24}$`)
-	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/rooms/{room}/{session}/live": h.live, "GET /api/rooms/{room}/{session}/recent": h.recent, "POST /api/rooms/{room}/{session}/moderate": h.moderate} {
+	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/rooms/{room}/{session}/history": h.listHistory, "GET /api/rooms/{room}/{session}/live": h.live, "GET /api/rooms/{room}/{session}/recent": h.recent, "POST /api/rooms/{room}/{session}/moderate": h.moderate} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			if !slug.MatchString(r.PathValue("room")) || !slug.MatchString(r.PathValue("session")) {
 				w.WriteHeader(400)
@@ -68,7 +81,7 @@ func Recover(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if v := recover(); v != nil {
-				log.Error("HTTP panic", "panic", v)
+				log.Error("HTTP panic", "panic", v, "method", r.Method, "path", r.URL.Path, "stack", string(debug.Stack()))
 				http.Error(w, "internal error", 500)
 			}
 		}()
@@ -78,7 +91,9 @@ func Recover(log *slog.Logger, next http.Handler) http.Handler {
 func roomID(r *http.Request) string { return r.PathValue("room") + "/" + r.PathValue("session") }
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("Write JSON response", "error", err)
+	}
 }
 func loopback(remote string) bool {
 	host, _, err := net.SplitHostPort(remote)
@@ -157,20 +172,23 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 		client.Close()
 		return
 	}
+	defer h.manager.Leave(client)
+	defer client.Close()
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	ready := client.AwaitSubscription(ctx)
 	cancel()
 	if !ready {
-		client.Close()
-		h.manager.Leave(client)
 		return
 	}
 
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	clock, _ := json.Marshal(protocol.ClockReady{ServerTimeMS: time.Now().UnixMilli()})
+	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return
+	}
+	clock, err := json.Marshal(protocol.ClockReady{ServerTimeMS: time.Now().UnixMilli()})
+	if err != nil {
+		return
+	}
 	if err := conn.WriteJSON(protocol.WsPacket{Type: protocol.TypeReady, Data: clock}); err != nil {
-		client.Close()
-		h.manager.Leave(client)
 		return
 	}
 

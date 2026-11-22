@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/scthy/maku/internal/metrics"
 	"github.com/scthy/maku/internal/protocol"
@@ -38,14 +39,15 @@ func Consume(ctx context.Context, brokers []string, store batchStore, log *slog.
 				log.Warn("Kafka fetch", "error", e.Err, "partition", e.Partition)
 			}
 		}
+		var partitionErr error
 		fetch.EachPartition(func(p kgo.FetchTopicPartition) {
-			if err == nil && len(p.Records) > 0 {
-				err = archivePartition(ctx, store, log, metrics, p.Records, cl.CommitRecords)
+			if partitionErr == nil && len(p.Records) > 0 {
+				partitionErr = archivePartition(ctx, store, log, metrics, p.Records, cl.CommitRecords)
 			}
 		})
 		cl.AllowRebalance()
-		if err != nil {
-			return err
+		if partitionErr != nil {
+			return partitionErr
 		}
 	}
 	return ctx.Err()
@@ -68,5 +70,15 @@ func archivePartition(ctx context.Context, store batchStore, log *slog.Logger, m
 	if err := persist(ctx, store, batch, log, metrics); err != nil {
 		return err
 	}
-	return commit(ctx, records[len(records)-1])
+	last := records[len(records)-1]
+	if ctx.Err() == nil {
+		err := commit(ctx, last)
+		if err == nil || ctx.Err() == nil {
+			return err
+		}
+	}
+	// The batch is durable. A cancellation racing the commit gets a bounded retry.
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	return commit(commitCtx, last)
 }
