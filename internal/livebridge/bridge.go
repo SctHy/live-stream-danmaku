@@ -290,7 +290,8 @@ func (m *Manager) connect(ctx context.Context, id uint64, deliver func(protocol.
 		conn, _, dialErr := m.cfg.Dialer.DialContext(dialCtx, endpoint.String(), http.Header{"Origin": {origin}, "User-Agent": {agent}})
 		cancel()
 		if dialErr == nil {
-			return session(ctx, conn, auth, deliver)
+			logger := m.cfg.Logger.With("room", id, "real_room", room.ID, "host", endpoint.Host)
+			return session(ctx, conn, auth, deliver, logger)
 		}
 		err = dialErr
 		if ctx.Err() != nil {
@@ -305,7 +306,7 @@ func write(conn *websocket.Conn, op uint32, body []byte) error {
 	}
 	return conn.WriteMessage(websocket.BinaryMessage, packet(1, op, body))
 }
-func session(parent context.Context, conn *websocket.Conn, auth []byte, deliver func(protocol.LiveDanmaku)) error {
+func session(parent context.Context, conn *websocket.Conn, auth []byte, deliver func(protocol.LiveDanmaku), logger *slog.Logger) error {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
 	authenticated := make(chan struct{})
@@ -320,13 +321,13 @@ func session(parent context.Context, conn *websocket.Conn, auth []byte, deliver 
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
+			if err := write(conn, 2, nil); err != nil {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if write(conn, 2, nil) != nil {
-					return
-				}
 			}
 		}
 	}()
@@ -362,6 +363,7 @@ func session(parent context.Context, conn *websocket.Conn, auth []byte, deliver 
 				if !ready {
 					ready = true
 					close(authenticated)
+					logger.Info("Bilibili live bridge connected")
 				}
 			case 5:
 				if ready {

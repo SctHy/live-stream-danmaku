@@ -1,6 +1,7 @@
 package livebridge
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -96,6 +97,11 @@ func TestSharedConnectionReconnectAndRelease(t *testing.T) {
 		}
 		if err := conn.WriteMessage(websocket.BinaryMessage, packet(1, 8, []byte(`{"code":0}`))); err != nil {
 			t.Error(err)
+			return
+		}
+		typ, heartbeat, err := conn.ReadMessage()
+		if err != nil || typ != websocket.BinaryMessage || !bytes.Equal(heartbeat, packet(1, 2, nil)) {
+			t.Errorf("initial heartbeat: type=%d data=%x err=%v", typ, heartbeat, err)
 			return
 		}
 		if err := conn.WriteMessage(websocket.BinaryMessage, compressed); err != nil {

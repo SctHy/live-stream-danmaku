@@ -62,6 +62,7 @@ const receiptText = new Map([
 
 const protocolURL = '/assets/protocol.js'
 const packetType: ProtocolTypes = await import(/* @vite-ignore */ protocolURL)
+const liveDanmakuType = packetType.liveDanmaku ?? 108
 
 const ui = {
   join: document.querySelector<HTMLFormElement>('#join')!,
@@ -305,7 +306,7 @@ async function connect() {
       for (const p of Array.isArray(parsed) ? parsed : [parsed]) {
         if (p.type === packetType.ready) {
           void sync()
-        } else if (p.type === packetType.liveDanmaku) {
+        } else if (p.type === liveDanmakuType) {
           if (ui.liveComments.checked && !video.hidden && (promoted || !wsOpen())) show(p.data, true)
         } else if (p.type === packetType.migrate) {
           if (promoted) void connect()

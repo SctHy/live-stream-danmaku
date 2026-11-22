@@ -136,7 +136,18 @@ func TestRecoverAndOrigin(t *testing.T) {
 func TestLiveDanmakuProtocolExport(t *testing.T) {
 	w := httptest.NewRecorder()
 	routes(&fakeStore{}).ServeHTTP(w, httptest.NewRequest("GET", "/assets/protocol.js", nil))
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("protocol Cache-Control = %q", got)
+	}
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "liveDanmaku=108") {
 		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestIndexCacheControl(t *testing.T) {
+	w := httptest.NewRecorder()
+	routes(&fakeStore{}).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if got := w.Header().Get("Cache-Control"); w.Code != http.StatusOK || got != "no-cache" {
+		t.Fatalf("index status = %d, Cache-Control = %q", w.Code, got)
 	}
 }
