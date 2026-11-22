@@ -1,61 +1,125 @@
 import './Settings'
 import {enqueue, removeMessage, resetOverlay} from './danmaku'
 import {playRoom} from './player'
-const protocolURL = '/assets/protocol.js'
-const packetType = await import(/* @vite-ignore */ protocolURL)
+// The gateway exports these numeric discriminants from internal/protocol/message.go.
+interface ProtocolTypes {
+  danmaku: 101
+  stats: 102
+  like: 103
+  receipt: 104
+  withdraw: 105
+  ready: 106
+  migrate: 107
+}
 
-const $ = (id) => document.getElementById(id)
+interface DanmakuMessage {
+  id: number
+  room_id: string
+  event_id: string
+  client_msg_id?: string
+  user_id: number
+  content: string
+  send_time: string
+}
+interface Stats { online: number; likes: number; pos?: string }
+interface Receipt { client_msg_id: string; status: string; event_id: string }
+interface Packet<K extends keyof ProtocolTypes, D> {
+  type: ProtocolTypes[K]
+  room_id?: string
+  data: D
+}
+type JournalEvent = { pos: string; prev: string } & (
+  | Packet<'danmaku', DanmakuMessage>
+  | Packet<'withdraw', { event_id: string }>
+)
+type ServerPacket = JournalEvent
+  | Packet<'stats', Stats>
+  | Packet<'receipt', Receipt>
+  | Packet<'ready', { server_time_ms: number }>
+  | Packet<'migrate', Record<string, never>>
+interface Recovery { events: JournalEvent[]; pos: string; reset: boolean }
+interface PendingSend { started: number; data: { client_msg_id: string; content: string } }
+
+const receiptText = new Map([
+  ['accepted', '弹幕已发布'],
+  ['invalid', '内容无效'],
+  ['muted', '当前已禁言'],
+  ['rate_limited', '发送过快'],
+  ['filtered', '内容包含敏感词'],
+])
+
+const protocolURL = '/assets/protocol.js'
+const packetType: ProtocolTypes = await import(/* @vite-ignore */ protocolURL)
+
+const ui = {
+  join: document.querySelector<HTMLFormElement>('#join')!,
+  video: document.querySelector<HTMLVideoElement>('#video')!,
+  sourceStatus: document.querySelector<HTMLSpanElement>('#source-status')!,
+  fullscreen: document.querySelector<HTMLButtonElement>('#fullscreen')!,
+  feedback: document.querySelector<HTMLParagraphElement>('#feedback')!,
+  send: document.querySelector<HTMLButtonElement>('#send')!,
+  like: document.querySelector<HTMLButtonElement>('#like')!,
+  message: document.querySelector<HTMLInputElement>('#message')!,
+  retry: document.querySelector<HTMLButtonElement>('#retry')!,
+  target: document.querySelector<HTMLSelectElement>('#target')!,
+  messages: document.querySelector<HTMLOListElement>('#messages')!,
+  stats: document.querySelector<HTMLSpanElement>('#stats')!,
+  connection: document.querySelector<HTMLSpanElement>('#connection')!,
+  compose: document.querySelector<HTMLFormElement>('#compose')!,
+  moderation: document.querySelector<HTMLFormElement>('#moderation')!,
+  modKey: document.querySelector<HTMLInputElement>('#modKey')!,
+}
 const params = new URLSearchParams(location.search)
 const room = params.get('room') || '6'
 const session = params.get('session') || 'screening-01'
-$('join').elements.room.value = room
-$('join').elements.session.value = session
+ui.join.querySelector<HTMLInputElement>('[name=room]')!.value = room
+ui.join.querySelector<HTMLInputElement>('[name=session]')!.value = session
 const base = '/api/rooms/' + [room, session].map(encodeURIComponent).join('/')
-const video = $('video')
+const { video } = ui
 const listLimit = 100
 if (/^\d+$/.test(room)) {
   video.hidden = false
-  playRoom(video, room, text => { $('source-status').textContent = text })
+  playRoom(video, room, text => { ui.sourceStatus.textContent = text })
 }
-$('fullscreen').onclick = () => {
+ui.fullscreen.onclick = () => {
   if (document.fullscreenElement) void document.exitFullscreen()
-  else document.querySelector('.screen').requestFullscreen().catch(() => feedback('浏览器未允许全屏'))
+  else document.querySelector('.screen')!.requestFullscreen().catch(() => feedback('浏览器未允许全屏'))
 }
-let socket,
-  cursor = '',
-  ready = false,
-  retries = 0
-let pendingSend = null
-let userID = null
-const visible = new Map()
-const feedback = (text) => {
-  $('feedback').textContent = text
+let socket: WebSocket | undefined
+let cursor = ''
+let ready = false
+let retries = 0
+let pendingSend: PendingSend | null = null
+let userID: number | null = null
+const visible = new Map<string, HTMLLIElement>()
+const feedback = (text: string) => {
+  ui.feedback.textContent = text
 }
 function controls() {
-  for (const id of ['send', 'like', 'message']) $(id).disabled = !ready
+  for (const input of [ui.send, ui.like, ui.message]) input.disabled = !ready
 
-  $('send').disabled ||= !!pendingSend
-  $('retry').hidden = !pendingSend
-  $('retry').disabled = !ready
+  ui.send.disabled ||= !!pendingSend
+  ui.retry.hidden = !pendingSend
+  ui.retry.disabled = !ready
 }
 function clear() {
   visible.clear()
-  $('target').length = 1
-  $('messages').replaceChildren()
+  ui.target.length = 1
+  ui.messages.replaceChildren()
   resetOverlay()
   queuedRows.clear()
   snapshotRows = false
 }
-const queuedRows = new Map()
+const queuedRows = new Map<string, DanmakuMessage>()
 let listFrame = 0
 let snapshotRows = false
-function show(d, animate) {
+function show(d: DanmakuMessage, animate: boolean) {
   if (visible.has(d.event_id) || queuedRows.has(d.event_id)) return
   if (animate) enqueue(d)
   else snapshotRows = true
   if (document.hidden) return
   queuedRows.set(d.event_id, d)
-  if (queuedRows.size > listLimit) queuedRows.delete(queuedRows.keys().next().value)
+  if (queuedRows.size > listLimit) queuedRows.delete(queuedRows.keys().next().value!)
   if (!listFrame) listFrame = requestAnimationFrame(flushRows)
 }
 function flushRows() {
@@ -66,33 +130,33 @@ function flushRows() {
   queuedRows.clear()
   snapshotRows = false
 }
-function appendRow(d) {
+function appendRow(d: DanmakuMessage) {
   if (visible.has(d.event_id)) return
   const item = document.createElement('li'),
     user = document.createElement('small')
   user.textContent = '观众 ' + d.user_id
   item.append(user, document.createTextNode(d.content))
-  $('messages').prepend(item)
+  ui.messages.prepend(item)
   const option = new Option(d.content.slice(0, 28), d.event_id)
-  option.dataset.uid = d.user_id
-  $('target').add(option, 1)
-  if ($('target').length > 101) $('target').remove(101)
+  option.dataset.uid = String(d.user_id)
+  ui.target.add(option, 1)
+  if (ui.target.length > 101) ui.target.remove(101)
   visible.set(d.event_id, item)
   if (visible.size > listLimit) {
-    const key = visible.keys().next().value
-    visible.get(key).remove()
+    const key = visible.keys().next().value!
+    visible.get(key)!.remove()
     visible.delete(key)
   }
 }
-function withdraw(id) {
+function withdraw(id: string) {
   visible.get(id)?.remove()
   visible.delete(id)
-  for (const option of Array.from($('target').options))
+  for (const option of Array.from(ui.target.options))
     if (option.value === id) option.remove()
   queuedRows.delete(id)
   removeMessage(id)
 }
-function apply(p, animate) {
+function apply(p: JournalEvent, animate: boolean) {
   if (p.type === packetType.withdraw) withdraw(p.data.event_id)
   if (p.type === packetType.danmaku) {
     show(p.data, animate)
@@ -104,7 +168,7 @@ function apply(p, animate) {
   }
   cursor = p.pos
 }
-function older(a, b) {
+function older(a: string, b: string) {
   const [ae, aid] = a.includes('@') ? a.split('@') : ['', a]
   const [be, bid] = b.includes('@') ? b.split('@') : ['', b]
   if (ae !== be) return false
@@ -112,19 +176,19 @@ function older(a, b) {
     [bt, bs] = bid.split('-').map(BigInt)
   return at < bt || (at === bt && as <= bs)
 }
-async function json(url, options) {
+async function json<T>(url: string, options: RequestInit): Promise<T> {
   const r = await fetch(url, options)
   if (!r.ok) throw Error(String(r.status))
   return r.json()
 }
 let connecting = false
-let retryTimer
+let retryTimer: number | undefined
 async function connect() {
   if (connecting) return
   clearTimeout(retryTimer)
   connecting = true
   try {
-    const sessionInfo = await json('/api/session', { method: 'POST', signal: AbortSignal.timeout(8000) })
+    const sessionInfo = await json<{ user_id: number }>('/api/session', { method: 'POST', signal: AbortSignal.timeout(8000) })
     if (userID !== sessionInfo.user_id && pendingSend) {
       pendingSend = null
       feedback('身份已变更，上一条的结果请查看近期弹幕')
@@ -136,8 +200,8 @@ async function connect() {
     )
     let promoted = false
     const deadline = setTimeout(() => ws.close(), 10000)
-    let pending = [],
-      syncing = false
+    let pending: JournalEvent[] = []
+    let syncing = false
     async function sync() {
       if (syncing) return
       // A fresh Redis snapshot covers every event received before this request.
@@ -145,7 +209,7 @@ async function connect() {
       syncing = true
       try {
         const after = cursor
-        const res = await json(
+        const res = await json<Recovery>(
           base + '/recent?after=' + encodeURIComponent(after),
           { signal: AbortSignal.timeout(8000) },
         )
@@ -192,12 +256,12 @@ async function connect() {
         ready = true
         retries = 0
         controls()
-        $('connection').textContent = '已连接'
+        ui.connection.textContent = '已连接'
       } catch {
         ws.close()
       }
     }
-    function ingest(p) {
+    function ingest(p: JournalEvent) {
       if (syncing) {
         if (pending.length >= 512) ws.close()
         else pending.push(p)
@@ -213,7 +277,7 @@ async function connect() {
     }
     ws.onmessage = ({ data }) => {
       if (promoted && ws !== socket) return
-      const parsed = JSON.parse(data)
+      const parsed: ServerPacket | ServerPacket[] = JSON.parse(data)
       for (const p of Array.isArray(parsed) ? parsed : [parsed]) {
         if (p.type === packetType.ready) {
           void sync()
@@ -221,7 +285,7 @@ async function connect() {
           if (promoted) void connect()
           else ws.close()
         } else if (p.type === packetType.stats && promoted) {
-          $('stats').textContent =
+          ui.stats.textContent =
             '在线 ' + p.data.online + ' · 赞 ' + p.data.likes
           if (p.data.pos && cursor && !older(p.data.pos, cursor)) void sync()
         } else if (
@@ -229,23 +293,14 @@ async function connect() {
           (!p.data.client_msg_id || p.data.client_msg_id === pendingSend?.data.client_msg_id)
         ) {
           if (pendingSend && p.data.client_msg_id && p.data.status !== 'unavailable') {
-            if (p.data.status !== 'accepted' && !$('message').value) {
-              $('message').value = pendingSend.data.content
+            if (p.data.status !== 'accepted' && !ui.message.value) {
+              ui.message.value = pendingSend.data.content
             }
             pendingSend = null
           }
           controls()
-          feedback(
-            {
-              accepted: '弹幕已发布',
-              invalid: '内容无效',
-              muted: '当前已禁言',
-              rate_limited: '发送过快',
-              filtered: '内容包含敏感词',
-              overloaded: '网关繁忙，请稍后重试',
-            }[p.data.status] || '服务暂不可用',
-          )
-        } else if (p.pos) ingest(p)
+          feedback(receiptText.get(p.data.status) ?? '服务暂不可用')
+        } else if ('pos' in p && p.pos) ingest(p)
       }
     }
     ws.onclose = () => {
@@ -264,17 +319,17 @@ function reconnect() {
     ready = false
     if (pendingSend) feedback('连接中断，最后一条弹幕的发送结果待确认')
     controls()
-    $('connection').textContent = '正在重连'
+    ui.connection.textContent = '正在重连'
   }
   if (connecting) return
   clearTimeout(retryTimer)
   const backoff = Math.min(8000, 300 * 2 ** retries++)
   retryTimer = setTimeout(connect, backoff / 2 + Math.random() * backoff)
 }
-$('compose').onsubmit = (e) => {
+ui.compose.onsubmit = (e) => {
   e.preventDefault()
   if (pendingSend || !ready || !wsOpen()) return
-  const text = $('message').value.trim()
+  const text = ui.message.value.trim()
   if (!text) return
   pendingSend = {
     started: Date.now(),
@@ -284,7 +339,7 @@ $('compose').onsubmit = (e) => {
     },
   }
   sendPending()
-  $('message').value = ''
+  ui.message.value = ''
   feedback('发送中')
 }
 function sendPending() {
@@ -293,32 +348,32 @@ function sendPending() {
     pendingSend = null
     feedback('重试期限已过，请在近期弹幕中确认')
   } else {
-    socket.send(JSON.stringify({type: packetType.danmaku, data: pendingSend.data}))
+    socket?.send(JSON.stringify({type: packetType.danmaku, data: pendingSend.data}))
   }
   controls()
 }
-$('retry').onclick = sendPending
+ui.retry.onclick = sendPending
 function wsOpen() {
   return socket?.readyState === WebSocket.OPEN
 }
-$('like').onclick = () => {
-  if (wsOpen()) socket.send(JSON.stringify({ type: packetType.like, data: { count: 1 } }))
+ui.like.onclick = () => {
+  if (wsOpen()) socket?.send(JSON.stringify({ type: packetType.like, data: { count: 1 } }))
 }
 void connect()
 
-$('moderation').onsubmit = async (e) => {
+ui.moderation.onsubmit = async (e) => {
   e.preventDefault()
-  const selected = $('target').selectedOptions[0]
+  const selected = ui.target.selectedOptions[0]
   if (!selected?.value) return
   try {
     const response = await fetch(base + '/moderate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + $('modKey').value,
+        Authorization: 'Bearer ' + ui.modKey.value,
       },
       body: JSON.stringify({
-        action: e.submitter.value,
+        action: e.submitter instanceof HTMLButtonElement ? e.submitter.value : undefined,
         event_id: selected.value,
         user_id: Number(selected.dataset.uid),
         seconds: 60,
