@@ -1,4 +1,4 @@
-type Message = {event_id: string; content: string}
+type Message = {event_id: string; content: string; color?: string}
 type Sprite = {id: string; image: HTMLCanvasElement; x: number; lane: number}
 export const settings = {size: 24, density: 80, area: 75, opacity: 90, speed: 150, color: '#ffffff'}
 export const overlay = document.querySelector<HTMLCanvasElement>('#overlay')!
@@ -32,7 +32,7 @@ export function enqueue(message: Message) {
     frame = requestAnimationFrame(draw)
   }
 }
-function rasterize(text: string) {
+function rasterize({content: text, color}: Message) {
   const font = '600 ' + settings.size + 'px system-ui, sans-serif'
   ctx.font = font
   const image = document.createElement('canvas')
@@ -43,7 +43,8 @@ function rasterize(text: string) {
   ink.textBaseline = 'middle'
   ink.lineWidth = 3
   ink.strokeText(text, 3, image.height / 2, image.width - 5)
-  ink.fillStyle = settings.color
+  ink.fillStyle = settings.color.toLowerCase() === '#ffffff' && color && /^#[0-9a-f]{6}$/i.test(color)
+    ? color : settings.color
   ink.fillText(text, 3, image.height / 2, image.width - 5)
   return image
 }
@@ -66,7 +67,7 @@ function draw(now: number) {
   for (let lane = 0; lane < lanes && pending.length && sprites.length < settings.density && admitted < 4; lane++) {
     if (occupied.has(lane)) continue
     const {message} = pending.shift()!
-    sprites.push({id: message.event_id, image: rasterize(message.content), x: width, lane})
+    sprites.push({id: message.event_id, image: rasterize(message), x: width, lane})
     admitted++
   }
   for (const s of sprites) ctx.drawImage(s.image, reduced.matches ? 3 : Math.round(s.x), s.lane * pitch)

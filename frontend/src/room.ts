@@ -1,4 +1,4 @@
-import './Settings'
+import './settings'
 import {enqueue, removeMessage, resetOverlay} from './danmaku'
 import {playRoom} from './player'
 // The gateway exports these numeric discriminants from internal/protocol/message.go.
@@ -9,6 +9,7 @@ interface ProtocolTypes {
   receipt: 104
   withdraw: 105
   ready: 106
+  liveDanmaku: 108
   migrate: 107
 }
 
@@ -21,6 +22,16 @@ interface DanmakuMessage {
   content: string
   send_time: string
 }
+interface LiveDanmaku {
+  event_id: string
+  room_id: string
+  user_name: string
+  content: string
+  color?: string
+  source: string
+  send_time: string
+}
+type SidebarMessage = DanmakuMessage | LiveDanmaku
 interface Stats { online: number; likes: number; pos?: string }
 interface Receipt { client_msg_id: string; status: string; event_id: string }
 interface Packet<K extends keyof ProtocolTypes, D> {
@@ -33,6 +44,7 @@ type JournalEvent = { pos: string; prev: string } & (
   | Packet<'withdraw', { event_id: string }>
 )
 type ServerPacket = JournalEvent
+  | Packet<'liveDanmaku', LiveDanmaku>
   | Packet<'stats', Stats>
   | Packet<'receipt', Receipt>
   | Packet<'ready', { server_time_ms: number }>
@@ -53,6 +65,7 @@ const packetType: ProtocolTypes = await import(/* @vite-ignore */ protocolURL)
 
 const ui = {
   join: document.querySelector<HTMLFormElement>('#join')!,
+  liveComments: document.querySelector<HTMLInputElement>('#live-comments')!,
   video: document.querySelector<HTMLVideoElement>('#video')!,
   sourceStatus: document.querySelector<HTMLSpanElement>('#source-status')!,
   fullscreen: document.querySelector<HTMLButtonElement>('#fullscreen')!,
@@ -78,6 +91,7 @@ const base = '/api/rooms/' + [room, session].map(encodeURIComponent).join('/')
 const { video } = ui
 const listLimit = 100
 if (/^\d+$/.test(room)) {
+  ui.liveComments.labels![0].hidden = false
   video.hidden = false
   playRoom(video, room, text => { ui.sourceStatus.textContent = text })
 }
@@ -110,10 +124,10 @@ function clear() {
   queuedRows.clear()
   snapshotRows = false
 }
-const queuedRows = new Map<string, DanmakuMessage>()
+const queuedRows = new Map<string, SidebarMessage>()
 let listFrame = 0
 let snapshotRows = false
-function show(d: DanmakuMessage, animate: boolean) {
+function show(d: SidebarMessage, animate: boolean) {
   if (visible.has(d.event_id) || queuedRows.has(d.event_id)) return
   if (animate) enqueue(d)
   else snapshotRows = true
@@ -130,17 +144,26 @@ function flushRows() {
   queuedRows.clear()
   snapshotRows = false
 }
-function appendRow(d: DanmakuMessage) {
+function appendRow(d: SidebarMessage) {
   if (visible.has(d.event_id)) return
   const item = document.createElement('li'),
     user = document.createElement('small')
-  user.textContent = '观众 ' + d.user_id
+  if ('user_name' in d) {
+    const badge = document.createElement('span')
+    badge.className = 'upstream'
+    badge.textContent = 'B站'
+    user.append(badge, document.createTextNode(d.user_name))
+  } else {
+    user.textContent = '观众 ' + d.user_id
+  }
   item.append(user, document.createTextNode(d.content))
   ui.messages.prepend(item)
-  const option = new Option(d.content.slice(0, 28), d.event_id)
-  option.dataset.uid = String(d.user_id)
-  ui.target.add(option, 1)
-  if (ui.target.length > 101) ui.target.remove(101)
+  if ('user_id' in d) {
+    const option = new Option(d.content.slice(0, 28), d.event_id)
+    option.dataset.uid = String(d.user_id)
+    ui.target.add(option, 1)
+    if (ui.target.length > 101) ui.target.remove(101)
+  }
   visible.set(d.event_id, item)
   if (visible.size > listLimit) {
     const key = visible.keys().next().value!
@@ -256,6 +279,7 @@ async function connect() {
         ready = true
         retries = 0
         controls()
+        ui.connection.dataset.state = 'connected'
         ui.connection.textContent = '已连接'
       } catch {
         ws.close()
@@ -281,6 +305,8 @@ async function connect() {
       for (const p of Array.isArray(parsed) ? parsed : [parsed]) {
         if (p.type === packetType.ready) {
           void sync()
+        } else if (p.type === packetType.liveDanmaku) {
+          if (ui.liveComments.checked && !video.hidden && (promoted || !wsOpen())) show(p.data, true)
         } else if (p.type === packetType.migrate) {
           if (promoted) void connect()
           else ws.close()
@@ -319,6 +345,7 @@ function reconnect() {
     ready = false
     if (pendingSend) feedback('连接中断，最后一条弹幕的发送结果待确认')
     controls()
+    ui.connection.dataset.state = 'reconnecting'
     ui.connection.textContent = '正在重连'
   }
   if (connecting) return

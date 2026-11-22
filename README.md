@@ -19,6 +19,8 @@ flowchart LR
     G -->|history · Keyset 查询| P
     B -->|playurl| G
     G -->|解析直播地址| U[B 站直播 API]
+    W[B 站弹幕 WSS] -->|按直播间共享连接| LB[internal/livebridge]
+    LB -->|实时弹幕 · 108| G
     B -->|FLV / HLS 播放| CDN[视频 CDN]
 ```
 
@@ -30,6 +32,7 @@ flowchart LR
 4. **让归档批次可以重放。** Kafka 使用 `LeaderAck`。Archiver 按分区用 5 个数组绑定参数执行 PostgreSQL `UNNEST` 批写，`ON CONFLICT (event_id) DO NOTHING` 吸收重复投递。瞬时写入错误按带抖动的指数退避重试，SQLSTATE 类别 22/23 则降级逐条写入，将坏记录记入死信日志与指标。批次处理完再提交位点，停机时已落库批次有 3 秒提交宽限。历史查询沿 `(room_id, id DESC)` 索引按 `before_id` 翻页，使用 `NOT EXISTS` 过滤撤回记录，避免深分页跳过大量行。
 5. **限制过滤与回源的开销。** Aho-Corasick 自动机通过 `atomic.Pointer` 提供无锁词库快照，`SIGHUP` 重载成功后原子替换；未命中时匹配与打码均为 0 B、0 次分配。直播源由独立的 6 秒超时 HTTP 客户端解析，同房间并发请求共享一次回源。缓存上限 512 项，开播与未开播结果分别缓存 15 秒和 5 秒。视频由浏览器直连 CDN。
 6. **区分发布回执、历史记录与统计。** `accepted` 表示 Redis 已接受广播与恢复流写入。网关随后异步投递 Kafka，进程崩溃或生产者缓冲区满时，已发布弹幕可能缺失历史。在线人数和点赞先在网关内存中汇总，再周期性通过 Redis 聚合，客户端看到的是最终一致的统计快照。
+7. **按直播间共享上游弹幕。** 每个网关通过 `internal/livebridge` 缓存 WBI 签名密钥与 `buvid3`，按数字直播间的活跃订阅引用共享上游 WSS 连接，最后一个订阅释放后断开。桥接器限制 zlib 解压输出大小，解析弹幕后复用 Hub 分片与自适应合批。下行帧 `TypeLiveDanmaku = 108` 仅供实时展示，不推进恢复游标，也不写入 Kafka 或 PostgreSQL。
 
 ## 实测性能概览
 
@@ -71,12 +74,13 @@ maku/
 │   ├── filter/         # Aho-Corasick 敏感词过滤与热加载
 │   ├── httpapi/        # HTTP/WebSocket 路由、访客会话、直播源解析及内嵌 web 资源
 │   ├── hub/            # 房间管理、分片派发、自适应合批、背压与滚动迁移
+│   ├── livebridge/     # B 站实时弹幕鉴权、上游共享连接与帧解码
 │   ├── metrics/        # Prometheus 业务与归档指标
 │   ├── mq/             # Kafka 生产者与批量消费者（含退避重试）
 │   ├── protocol/       # WebSocket 协议帧与消息结构定义
 │   ├── pubsub/         # Redis Lua 原子日志流、共享订阅多路复用与统计
 │   └── store/          # PostgreSQL 连接池、内嵌迁移与 UNNEST 批量写入
-├── frontend/           # 放映室前端源码（Vite + TypeScript + React）
+├── frontend/           # 纯 TypeScript（零 UI 框架依赖，仅依赖 mpegts.js / hls.js）
 ├── deploy/             # Prometheus 抓取配置
 ├── docs/               # 基准测试报告（benchmarks.md）
 └── scripts/            # 端到端恢复与迁移校验脚本
@@ -95,7 +99,7 @@ make run-archiver    # 终端一
 make run-gateway     # 终端二
 ```
 
-打开 `http://127.0.0.1:8080/`。两个浏览器进入相同房间与场次即可互发弹幕。数字房间号同时启用 B 站直播源解析，其他房间只启用弹幕。修改前端后，执行以下命令并重启网关以载入新产物。
+打开 `http://127.0.0.1:8080/`。两个浏览器进入相同房间与场次即可互发弹幕。数字房间同时播放 B 站直播并展示实时弹幕，可用播放器下方的「B 站弹幕」开关控制展示。侧栏以「B站」标明来源，房管菜单只列出本地弹幕。修改前端后，执行以下命令并重启网关以载入新产物。
 
 ```sh
 (cd frontend && npm ci && npm run build)
@@ -109,6 +113,7 @@ make run-gateway     # 终端二
 | 存储 | `DATABASE_URL` | 本机 PostgreSQL 5432 的 `danmaku_db`，默认凭据与 Compose 一致 |
 | 房管 | `DANMAKU_MOD_ROOM` / `DANMAKU_MOD_TOKEN` | 同时设置房间名与密钥后可执行房管操作 |
 | Gateway 监听 | `-host` / `-port` | `127.0.0.1` / `8080` |
+| Gateway 直播桥接 | `-bilibili-danmaku` | 默认 `true`，为数字房间接入 B 站实时弹幕 |
 | 扇出 | `-pubsub-shards` / `-room-shards` / `-send-queue` | 8 条订阅连接 / 32 个下行分片 / 每连接 512 帧 |
 | 合批 | `-batch-min-viewers` / `-batch-arrival-gap` / `-batch-window` | 128 人 / 2 ms / 5 ms |
 | 迁移 | `-migration-batch` / `-migration-inflight` / `-migration-timeout` | 每 100 ms 最多邀请 100 位 / 最多 64 位在途 / 30 秒 |
