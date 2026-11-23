@@ -31,7 +31,10 @@ func rooms(args []string) {
 	var hot, cold atomic.Int64
 	var sample []int64
 	join := func(room string, observe bool) *websocket.Conn {
-		c := dial(*addr, tag+room, false)
+		c, err := dial(*addr, tag+room, false)
+		if err != nil {
+			fatalf("%v", err)
+		}
 		conns = append(conns, c)
 		done.Add(1)
 		go func() {

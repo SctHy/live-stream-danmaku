@@ -30,7 +30,7 @@ func TestGatewayExposition(t *testing.T) {
 		return w.Body.String()
 	}
 	out := scrape(m)
-	if strings.Count(out, "# TYPE ") != 8 || strings.Contains(out, "unknown-room") {
+	if strings.Count(out, "# TYPE danmaku_") != 8 || strings.Contains(out, "unknown-room") {
 		t.Fatal(out)
 	}
 	for _, sample := range []string{"danmaku_active_connections 2", "danmaku_active_rooms 1", `danmaku_fanout_frames_total{mode="single"} 1`, `danmaku_fanout_frames_total{mode="batch"} 1`, `danmaku_delivery_queue_wait_seconds_bucket{le="0.002"} 1`, `danmaku_dropped_messages_total{reason="shard_full"} 6`, `danmaku_dropped_messages_total{reason="client_full"} 2`, "danmaku_kicked_slow_clients_total 1", `danmaku_rejected_total{reason="filtered"} 1`, "danmaku_kafka_publish_failures_total 1"} {

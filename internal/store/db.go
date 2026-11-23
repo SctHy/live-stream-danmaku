@@ -67,3 +67,6 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return nil
 	})
 }
+
+// Migrate applies the production migrations using the pool's configured search path.
+func Migrate(ctx context.Context, pool *pgxpool.Pool) error { return migrate(ctx, pool) }

@@ -38,15 +38,27 @@ flowchart LR
 
 ## 性能测试结果
 
-测试环境：Apple M4、macOS arm64、Go 1.27.4。单网关群发与双网关迁移为同机单轮实测，微基准统计方法详见[完整压测报告与复现命令](docs/benchmarks.md)。
+测试环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。profile 为 `full`，每个 arm 预热后保留 5 轮，表中为各轮中位数。
 
-| 测试场景 | 测试条件 | 实测结果 |
-| --- | --- | --- |
-| 单网关热门房间广播 | 160 位观众，800 条/秒，持续 4 秒（单条发送 → 批量合并） | 均完整送达 512,000 次。网络帧数 512,000 → 128,160（减少 74.97%）；热门房间延迟 P50 1.306 → 4.032 ms，P99 11.457 → 10.728 ms |
-| 双网关无缝迁移 | 每台各 12 位观众，每批迁 4 位，同时迁移上限 2 位 | 源网关 12 位全部平滑迁移，24 位观众均按序收齐 80 条消息。最后一位 606 ms 完成交接，单人补收 P99 为 6 ms |
-| 敏感词过滤 | 5,000 个五字敏感词，100 字文本 | 未命中时匹配 / 打码耗时 1.339 / 1.288 µs（0 B、0 次内存分配）；命中打码耗时 3.553 µs（2,528 B、4 次分配） |
-| 缩小互斥锁范围（移除网络 I/O 锁） | 3 轮中位数，优化前 → 优化后 | 本地向 10,000 人广播：244,783 → 236,425 ns/op（176 B、4 次分配）；Redis 房间订阅与退订：219,347 → 234,308 ns/op |
-| PostgreSQL 批量归档 | 每批 128 条，3 轮各 100 批，取中位数 | 绑定数组从 6 个减为 5 个：1.624 → 1.588 ms/批，内存 74,600 → 71,236 B/批，分配 965 → 961 次/批 |
+| 实验与负载 | 对照组 → 处理组 | 指标 | 对照中位数 | 处理中位数 | Gate |
+| --- | --- | --- | ---: | ---: | --- |
+| 自适应批合并 high | legacy → adaptive_batch | frames | 313600 | 103712 | PASS |
+| 慢连接隔离  | baseline_single_shard_unbounded → protected_default | rss_peak_bytes | 70189056 | 48103424 | PASS |
+| 双网关迁移  | crash → bounded | recent_peak_qps | 300 | 80 | PASS |
+| 迁移排空  | crash → bounded | drain_ms | 454 | 1905.344 | PASS |
+| 深分页 page_3600 | offset_baseline → cursor_before_id_prod | p50_us | 162105.792 | 552.792 | PASS |
+| 归档写入 batch_128 | row_by_row_tx → unnest_prod | rows_per_second | 4489.995356916848 | 80562.93349781599 | PASS |
+| 敏感词扫描 words_20000 | naive_contains → ac_prod | miss_us | 137.23083 | 1.31166 | PASS |
+| Redis 去重 2ms | multi_cmd_baseline → lua_evalsha_prod | race_duplicate_rate | 0.21875 | 0 | PASS |
+| 直播源请求合并 burst_120 | direct_no_coalesce → prod_singleflight_cache | cold_upstream_calls | 120 | 1 | PASS |
+
+```sh
+export REDIS_ADDR=127.0.0.1:26379
+export DATABASE_URL='postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable'
+make eval-all LEDGER=evaluation/candidate.json && make eval-diff
+```
+
+[评估口径与复现说明](docs/benchmarks.md) · [完整实测报告](evaluation/report.md) · [离线可视化](evaluation/report.html)
 
 ## HTTP 与 WebSocket 接口
 

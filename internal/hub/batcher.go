@@ -61,7 +61,7 @@ func (m *Hub) safeSend(c *Client, f *outboundFrame) {
 	}
 	c.pendingBytes.Add(-size)
 	m.metrics.ClientDrop(f.count)
-	if c.consecutiveDrops.Add(1) == 8 && c.done != nil {
+	if c.consecutiveDrops.Add(1) == 8 && !m.disableSlowKick && c.done != nil {
 		c.closeSlow()
 	}
 }

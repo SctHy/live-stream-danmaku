@@ -19,7 +19,10 @@ import (
 	"github.com/scthy/maku/internal/protocol"
 )
 
+var sessionClient = &http.Client{Timeout: 10 * time.Second}
+
 type observer struct {
+	err                      error
 	conn                     *websocket.Conn
 	received                 atomic.Int64
 	frames                   int
@@ -31,7 +34,7 @@ type observer struct {
 	bytes                    int64
 }
 
-func dial(addr, room string, batch bool) *websocket.Conn {
+func dial(addr, room string, batch bool) (*websocket.Conn, error) {
 	dialer := *websocket.DefaultDialer
 	if batch {
 		dialer.Subprotocols = []string{protocol.BatchProtocol}
@@ -39,37 +42,39 @@ func dial(addr, room string, batch bool) *websocket.Conn {
 	path := "/api/rooms/" + room + "/load/live"
 	headers := http.Header{}
 
-	response, err := http.Post("http://"+addr+"/api/session", "application/json", nil)
+	response, err := sessionClient.Post("http://"+addr+"/api/session", "application/json", nil)
 	if err != nil {
-		fatalf("%v", err)
+		return nil, err
 	}
 	io.Copy(io.Discard, response.Body)
 	response.Body.Close()
 	cookies := response.Cookies()
 	if response.StatusCode != 200 || len(cookies) == 0 {
-		fatalf("guest session unavailable")
+		return nil, fmt.Errorf("guest session unavailable: %s", response.Status)
 	}
 	headers.Set("Cookie", cookies[0].Name+"="+cookies[0].Value)
 
 	conn, _, err := dialer.Dial("ws://"+addr+path, headers)
 	if err != nil {
-		fatalf("%v", err)
+		return nil, err
 	}
 	// Keep completed loopback runs from consuming the ephemeral port range in TIME_WAIT.
 	if tcp, ok := conn.UnderlyingConn().(*net.TCPConn); ok {
 		if err := tcp.SetLinger(0); err != nil {
-			fatalf("%v", err)
+			conn.Close()
+			return nil, err
 		}
 	}
 
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var ready protocol.WsPacket
 	if err := conn.ReadJSON(&ready); err != nil || ready.Type != protocol.TypeReady {
-		fatalf("subscription failed: %v", err)
+		conn.Close()
+		return nil, fmt.Errorf("subscription failed: %v", err)
 	}
 	conn.SetReadDeadline(time.Time{})
 
-	return conn
+	return conn, nil
 }
 
 // Each room has a unique run name. Sequence numbers are local to that room.
@@ -86,8 +91,11 @@ func (o *observer) record(seq int) {
 	o.unique++
 }
 
-func connect(addr, room string, expected int, batch, sample bool, readers *sync.WaitGroup) *observer {
-	conn := dial(addr, room, batch)
+func connect(addr, room string, expected int, batch, sample bool, readers *sync.WaitGroup) (*observer, error) {
+	conn, err := dial(addr, room, batch)
+	if err != nil {
+		return nil, err
+	}
 	expectedRoom := room + "/load"
 	o := &observer{conn: conn, seen: make([]uint64, (expected+63)/64), cursor: "0-0", firstDuplicate: -1}
 	readers.Add(1)
@@ -101,7 +109,8 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 			now := time.Now().UnixMicro()
 			packets, err := protocol.DecodePackets(data)
 			if err != nil {
-				fatalf("%v", err)
+				o.err = err
+				return
 			}
 			n := 0
 			for _, p := range packets {
@@ -109,17 +118,20 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 					continue
 				}
 				if p.RoomID != expectedRoom {
-					fatalf("unexpected room %q for viewer in %q", p.RoomID, expectedRoom)
+					o.err = fmt.Errorf("unexpected room %q for viewer in %q", p.RoomID, expectedRoom)
+					return
 				}
 				n++
 				var d struct{ Content string }
 				if err := json.Unmarshal(p.Data, &d); err != nil {
-					fatalf("%v", err)
+					o.err = err
+					return
 				}
 				prefix, stamp, ok := strings.Cut(d.Content, "/")
 				seq, err := strconv.Atoi(prefix)
 				if !ok || err != nil || seq < 0 || seq >= expected {
-					fatalf("unexpected sequence %q", d.Content)
+					o.err = fmt.Errorf("unexpected sequence %q", d.Content)
+					return
 				}
 				o.record(seq)
 
@@ -131,7 +143,8 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 				if sample {
 					sent, err := strconv.ParseInt(stamp, 10, 64)
 					if err != nil {
-						fatalf("%v", err)
+						o.err = err
+						return
 					}
 					o.latency = append(o.latency, now-sent)
 				}
@@ -143,18 +156,19 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 			}
 		}
 	}()
-	return o
+	return o, nil
 }
 
-func send(writers []*observer, n, rate int) {
+func send(writers []*observer, n, rate int) error {
 	start := time.Now()
 	for i := 0; i < n; i++ {
 		time.Sleep(time.Until(start.Add(time.Second * time.Duration(i) / time.Duration(rate))))
 		data := fmt.Appendf(nil, `{"type":%d,"data":{"content":"%d/%d"}}`, protocol.TypeDanmaku, i, time.Now().UnixMicro())
 		if err := writers[i%len(writers)].conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			fatalf("%v", err)
+			return err
 		}
 	}
+	return nil
 }
 
 func percentile(samples []int64, percent int) int64 {

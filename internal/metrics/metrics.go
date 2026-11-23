@@ -21,6 +21,7 @@ type GatewayMetrics struct {
 
 func NewGatewayMetrics() *GatewayMetrics {
 	reg := prometheus.NewRegistry()
+	reg.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	gauge := func(name, help string) prometheus.Gauge {
 		g := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: "danmaku", Name: name, Help: help})
 		reg.MustRegister(g)

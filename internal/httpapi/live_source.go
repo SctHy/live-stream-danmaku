@@ -158,3 +158,12 @@ func (s *liveResolver) fetch(parent context.Context, room uint64) (liveResult, e
 	}
 	return liveResult{Live: result.Data.Status == 1, Sources: sources}, nil
 }
+
+// LiveSourceLookup builds a lookup against an injected upstream with optional shared caching.
+func LiveSourceLookup(endpoint string, client *http.Client, cached bool) func(context.Context, uint64) (liveResult, error) {
+	r := newLiveResolver(endpoint, client)
+	if cached {
+		return r.resolve
+	}
+	return r.fetch
+}

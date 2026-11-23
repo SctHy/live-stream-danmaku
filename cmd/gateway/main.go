@@ -27,6 +27,7 @@ func run() (code int) {
 	format := flag.String("log-format", "json", "text or json")
 	host := flag.String("host", "127.0.0.1", "listen address")
 	port := flag.String("port", "8080", "HTTP port")
+	disableKick := flag.Bool("bench-disable-slow-kick", false, "benchmark control: disable consecutive-drop eviction")
 	capacity := flag.Int("send-queue", hub.SendChanSize, "maximum frames per connection")
 	window := flag.Duration("batch-window", 5*time.Millisecond, "maximum hot-room coalescing delay")
 	gap := flag.Duration("batch-arrival-gap", hub.DefaultBatchArrivalGap, "maximum interval between arrivals to start a batch")
@@ -87,6 +88,7 @@ func run() (code int) {
 	}
 	m := hub.New(hub.Config{
 		LiveBridge:             bridge,
+		DisableSlowKick:        *disableKick,
 		Logger:                 log,
 		Producer:               producer,
 		Store:                  sessions,

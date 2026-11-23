@@ -50,6 +50,8 @@ type Hub struct {
 	drained    chan struct{}
 	retiring   atomic.Bool
 
+	disableSlowKick bool
+
 	serverID string
 
 	register chan *Client
@@ -96,6 +98,7 @@ const (
 )
 
 type Config struct {
+	DisableSlowKick        bool
 	LiveBridge             LiveBridge
 	Logger                 *slog.Logger
 	Producer               *mq.Producer
@@ -157,6 +160,7 @@ func New(cfg Config) *Hub {
 		store:          cfg.Store,
 		shardSeed:      maphash.MakeSeed(),
 
+		disableSlowKick: cfg.DisableSlowKick,
 		batchArrivalGap: cfg.BatchArrivalGap,
 		batchWindow:     cfg.BatchWindow,
 		minBatchViewers: cfg.MinBatchViewers,

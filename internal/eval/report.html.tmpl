@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Maku Evaluation</title>
+  <style>
+    :root { color-scheme: dark }
+    body { background: #161719; color: #ecefed; font: 15px system-ui; margin: auto; max-width: 1200px; padding: 2rem }
+    article, figure { border: 1px solid #393c3e; border-radius: 8px; padding: 1rem; overflow: auto }
+    section { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,32rem),1fr)); gap: 1rem }
+    figure { margin: 0 }
+    h1, h2, figcaption { color: #83e7c1 }
+    table { border-collapse: collapse; font-variant-numeric: tabular-nums }
+    td, th { border-bottom: 1px solid #393c3e; text-align: left; padding: .4rem }
+    svg { width: 100% }
+    svg text { fill: #ccd0ce; font: 11px system-ui }
+    footer { padding: 2rem 0 }
+  </style>
+</head>
+<body>
+  <h1>Maku Evaluation</h1>
+  <p>{{.Env}}</p>
+  <section>
+    {{range .Charts}}
+    <figure>
+      <figcaption>{{.Title}}</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="{{.Title}}">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">{{.Max}}</text><text x="45" y="113">0</text>
+        {{range .Ticks}}<text x="{{.X}}" y="135" text-anchor="middle">{{.Label}}</text>{{end}}
+        {{range .Lines}}
+        <polyline points="{{.Points}}" fill="none" stroke="{{.Color}}" stroke-width="2"/>
+        {{$color := .Color}}{{range .Samples}}
+        <circle cx="{{.X}}" cy="{{.Y}}" r="4" fill="{{$color}}"><title>{{.Value}}</title></circle>
+        {{end}}{{end}}
+      </svg>
+      {{range .Lines}}<span style="color:{{.Color}}">● {{.Name}} </span>{{end}}
+    </figure>
+    {{end}}
+  </section>
+  {{template "table" .Score}}
+  {{range .Details}}{{template "table" .}}{{end}}
+  {{with .Regression}}{{template "table" .}}{{end}}
+  <footer>{{.Env}}</footer>
+</body>
+</html>
+{{define "table"}}
+<h2>{{.Title}}</h2>
+<article><table>
+  <thead><tr>{{range .Headers}}<th>{{.}}</th>{{end}}</tr></thead>
+  <tbody>{{range .Rows}}<tr>{{range .}}<td>{{.}}</td>{{end}}</tr>{{end}}</tbody>
+</table></article>
+{{end}}

@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Maku Evaluation</title>
+  <style>
+    :root { color-scheme: dark }
+    body { background: #161719; color: #ecefed; font: 15px system-ui; margin: auto; max-width: 1200px; padding: 2rem }
+    article, figure { border: 1px solid #393c3e; border-radius: 8px; padding: 1rem; overflow: auto }
+    section { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,32rem),1fr)); gap: 1rem }
+    figure { margin: 0 }
+    h1, h2, figcaption { color: #83e7c1 }
+    table { border-collapse: collapse; font-variant-numeric: tabular-nums }
+    td, th { border-bottom: 1px solid #393c3e; text-align: left; padding: .4rem }
+    svg { width: 100% }
+    svg text { fill: #ccd0ce; font: 11px system-ui }
+    footer { padding: 2rem 0 }
+  </style>
+</head>
+<body>
+  <h1>Maku Evaluation</h1>
+  <p>darwin/arm64 · go1.27.4 · CPUs 10 · profile full · repeats 5 (&#43; warmup) · 2026-11-23T11:24:52.059372Z · git_sha c81541ed51f170e9e45d59c9f016beffc985fcdc · dirty true</p>
+  <section>
+    
+    <figure>
+      <figcaption>fanout_sweep · frames</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="fanout_sweep · frames">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">313600</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">low</text><text x="290" y="135" text-anchor="middle">medium</text><text x="500" y="135" text-anchor="middle">high</text>
+        
+        <polyline points="80.0,110.2 290.0,90.0 500.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="110.16326530612245" r="4" fill="#83e7c1"><title>6400</title></circle>
+        
+        <circle cx="290" cy="89.95918367346938" r="4" fill="#83e7c1"><title>76800</title></circle>
+        
+        <circle cx="500" cy="22" r="4" fill="#83e7c1"><title>313600</title></circle>
+        
+        <polyline points="80.0,110.2 290.0,90.0 500.0,82.2" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="110.16326530612245" r="4" fill="#eaba78"><title>6400</title></circle>
+        
+        <circle cx="290" cy="89.95918367346938" r="4" fill="#eaba78"><title>76800</title></circle>
+        
+        <circle cx="500" cy="82.23571428571428" r="4" fill="#eaba78"><title>103712</title></circle>
+        
+        <polyline points="80.0,110.2 290.0,90.0 500.0,68.7" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="80" cy="110.16326530612245" r="4" fill="#90baff"><title>6400</title></circle>
+        
+        <circle cx="290" cy="89.95918367346938" r="4" fill="#90baff"><title>76800</title></circle>
+        
+        <circle cx="500" cy="68.71964285714286" r="4" fill="#90baff"><title>150808</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● legacy </span><span style="color:#eaba78">● adaptive_batch </span><span style="color:#90baff">● mixed_25pct_legacy </span>
+    </figure>
+    
+    <figure>
+      <figcaption>fanout_sweep · process_cpu_seconds_total</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="fanout_sweep · process_cpu_seconds_total">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">3.159016</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">low</text><text x="290" y="135" text-anchor="middle">medium</text><text x="500" y="135" text-anchor="middle">high</text>
+        
+        <polyline points="80.0,99.9 290.0,69.8 500.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="99.88100155238213" r="4" fill="#83e7c1"><title>0.42537899999999995</title></circle>
+        
+        <circle cx="290" cy="69.83625344094492" r="4" fill="#83e7c1"><title>1.479955</title></circle>
+        
+        <circle cx="500" cy="22" r="4" fill="#83e7c1"><title>3.159016</title></circle>
+        
+        <polyline points="80.0,99.0 290.0,69.1 500.0,67.9" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="99.03439615373901" r="4" fill="#eaba78"><title>0.45509499999999997</title></circle>
+        
+        <circle cx="290" cy="69.10135687821779" r="4" fill="#eaba78"><title>1.50575</title></circle>
+        
+        <circle cx="500" cy="67.91808651808032" r="4" fill="#eaba78"><title>1.547283</title></circle>
+        
+        <polyline points="80.0,99.4 290.0,70.1 500.0,55.6" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="80" cy="99.35325493761349" r="4" fill="#90baff"><title>0.443903</title></circle>
+        
+        <circle cx="290" cy="70.10112389427593" r="4" fill="#90baff"><title>1.470658</title></circle>
+        
+        <circle cx="500" cy="55.61082691572312" r="4" fill="#90baff"><title>1.97927</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● legacy </span><span style="color:#eaba78">● adaptive_batch </span><span style="color:#90baff">● mixed_25pct_legacy </span>
+    </figure>
+    
+    <figure>
+      <figcaption>fanout_sweep · hot_p50_us</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="fanout_sweep · hot_p50_us">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">4807</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">low</text><text x="290" y="135" text-anchor="middle">medium</text><text x="500" y="135" text-anchor="middle">high</text>
+        
+        <polyline points="80.0,64.4 290.0,77.6 500.0,82.6" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="64.35073850634491" r="4" fill="#83e7c1"><title>2545</title></circle>
+        
+        <circle cx="290" cy="77.56896193051799" r="4" fill="#83e7c1"><title>1839</title></circle>
+        
+        <circle cx="500" cy="82.58664447680466" r="4" fill="#83e7c1"><title>1571</title></circle>
+        
+        <polyline points="80.0,63.9 290.0,76.5 500.0,22.0" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="63.920116496775535" r="4" fill="#eaba78"><title>2568</title></circle>
+        
+        <circle cx="290" cy="76.4643228624922" r="4" fill="#eaba78"><title>1898</title></circle>
+        
+        <circle cx="500" cy="22" r="4" fill="#eaba78"><title>4807</title></circle>
+        
+        <polyline points="80.0,66.4 290.0,78.3 500.0,48.1" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="80" cy="66.39151237778239" r="4" fill="#90baff"><title>2436</title></circle>
+        
+        <circle cx="290" cy="78.28042438111089" r="4" fill="#90baff"><title>1801</title></circle>
+        
+        <circle cx="500" cy="48.13688371125442" r="4" fill="#90baff"><title>3411</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● legacy </span><span style="color:#eaba78">● adaptive_batch </span><span style="color:#90baff">● mixed_25pct_legacy </span>
+    </figure>
+    
+    <figure>
+      <figcaption>fanout_sweep · hot_p99_us</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="fanout_sweep · hot_p99_us">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">11451</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">low</text><text x="290" y="135" text-anchor="middle">medium</text><text x="500" y="135" text-anchor="middle">high</text>
+        
+        <polyline points="80.0,77.7 290.0,67.6 500.0,39.1" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="77.72439088289232" r="4" fill="#83e7c1"><title>4361</title></circle>
+        
+        <circle cx="290" cy="67.59339795651036" r="4" fill="#83e7c1"><title>5650</title></circle>
+        
+        <circle cx="500" cy="39.118155619596536" r="4" fill="#83e7c1"><title>9273</title></circle>
+        
+        <polyline points="80.0,76.2 290.0,66.6 500.0,34.7" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="76.20749279538904" r="4" fill="#eaba78"><title>4554</title></circle>
+        
+        <circle cx="290" cy="66.61095100864554" r="4" fill="#eaba78"><title>5775</title></circle>
+        
+        <circle cx="500" cy="34.68535499083049" r="4" fill="#eaba78"><title>9837</title></circle>
+        
+        <polyline points="80.0,75.2 290.0,74.2 500.0,22.0" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="80" cy="75.18574796960965" r="4" fill="#90baff"><title>4684</title></circle>
+        
+        <circle cx="290" cy="74.21116059732775" r="4" fill="#90baff"><title>4808</title></circle>
+        
+        <circle cx="500" cy="22" r="4" fill="#90baff"><title>11451</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● legacy </span><span style="color:#eaba78">● adaptive_batch </span><span style="color:#90baff">● mixed_25pct_legacy </span>
+    </figure>
+    
+    <figure>
+      <figcaption>isolation_stalled · rss_peak_bytes</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="isolation_stalled · rss_peak_bytes">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">70189056</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle"></text>
+        
+        <polyline points="266.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="266" cy="22" r="4" fill="#83e7c1"><title>70189056</title></circle>
+        
+        <polyline points="314.0,50.3" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="314" cy="50.319327731092436" r="4" fill="#eaba78"><title>48103424</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● baseline_single_shard_unbounded </span><span style="color:#eaba78">● protected_default </span>
+    </figure>
+    
+    <figure>
+      <figcaption>isolation_stalled · cold_p99_us</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="isolation_stalled · cold_p99_us">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">8902</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle"></text>
+        
+        <polyline points="266.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="266" cy="22" r="4" fill="#83e7c1"><title>8902</title></circle>
+        
+        <polyline points="314.0,50.5" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="314" cy="50.470006740058416" r="4" fill="#eaba78"><title>6086</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● baseline_single_shard_unbounded </span><span style="color:#eaba78">● protected_default </span>
+    </figure>
+    
+    <figure>
+      <figcaption>migration_strategies · recent_peak_qps</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="migration_strategies · recent_peak_qps">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">480</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle"></text>
+        
+        <polyline points="242.0,55.8" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="242" cy="55.75" r="4" fill="#83e7c1"><title>300</title></circle>
+        
+        <polyline points="290.0,22.0" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="290" cy="22" r="4" fill="#eaba78"><title>480</title></circle>
+        
+        <polyline points="338.0,97.0" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="338" cy="97" r="4" fill="#90baff"><title>80</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● crash </span><span style="color:#eaba78">● fixed </span><span style="color:#90baff">● bounded </span>
+    </figure>
+    
+    <figure>
+      <figcaption>migration_strategies · connect_peak_qps</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="migration_strategies · connect_peak_qps">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">450</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle"></text>
+        
+        <polyline points="242.0,50.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="242" cy="50" r="4" fill="#83e7c1"><title>310</title></circle>
+        
+        <polyline points="290.0,22.0" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="290" cy="22" r="4" fill="#eaba78"><title>450</title></circle>
+        
+        <polyline points="338.0,96.0" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="338" cy="96" r="4" fill="#90baff"><title>80</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● crash </span><span style="color:#eaba78">● fixed </span><span style="color:#90baff">● bounded </span>
+    </figure>
+    
+    <figure>
+      <figcaption>migration_strategies · drain_ms</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="migration_strategies · drain_ms">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">1905.344</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle"></text>
+        
+        <polyline points="242.0,90.6" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="242" cy="90.55505357562728" r="4" fill="#83e7c1"><title>454</title></circle>
+        
+        <polyline points="290.0,92.7" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="290" cy="92.74635866279266" r="4" fill="#eaba78"><title>407.609</title></circle>
+        
+        <polyline points="338.0,22.0" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="338" cy="22" r="4" fill="#90baff"><title>1905.344</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● crash </span><span style="color:#eaba78">● fixed </span><span style="color:#90baff">● bounded </span>
+    </figure>
+    
+    <figure>
+      <figcaption>history_pagination · p50_us</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="history_pagination · p50_us">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">162105.792</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">page_1</text><text x="185" y="135" text-anchor="middle">page_200</text><text x="290" y="135" text-anchor="middle">page_1000</text><text x="395" y="135" text-anchor="middle">page_2000</text><text x="500" y="135" text-anchor="middle">page_3600</text>
+        
+        <polyline points="80.0,111.7 185.0,106.9 290.0,91.1 395.0,61.6 500.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="111.7120863516092" r="4" fill="#83e7c1"><title>518.583</title></circle>
+        
+        <circle cx="185" cy="106.90397567040664" r="4" fill="#83e7c1"><title>9178.834</title></circle>
+        
+        <circle cx="290" cy="91.11946909336837" r="4" fill="#83e7c1"><title>37609.5</title></circle>
+        
+        <circle cx="395" cy="61.56427917146846" r="4" fill="#83e7c1"><title>90843.583</title></circle>
+        
+        <circle cx="500" cy="22" r="4" fill="#83e7c1"><title>162105.792</title></circle>
+        
+        <polyline points="80.0,111.7 185.0,111.7 290.0,111.7 395.0,111.7 500.0,111.7" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="111.71444592183356" r="4" fill="#eaba78"><title>514.333</title></circle>
+        
+        <circle cx="185" cy="111.7036191032582" r="4" fill="#eaba78"><title>533.834</title></circle>
+        
+        <circle cx="290" cy="111.70947194780061" r="4" fill="#eaba78"><title>523.292</title></circle>
+        
+        <circle cx="395" cy="111.67713195590198" r="4" fill="#eaba78"><title>581.542</title></circle>
+        
+        <circle cx="500" cy="111.69309375447855" r="4" fill="#eaba78"><title>552.792</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● offset_baseline </span><span style="color:#eaba78">● cursor_before_id_prod </span>
+    </figure>
+    
+    <figure>
+      <figcaption>pg_archive_write · rows_per_second</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="pg_archive_write · rows_per_second">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">80562.93349781599</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle">batch_128</text>
+        
+        <polyline points="242.0,107.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="242" cy="106.98405079634456" r="4" fill="#83e7c1"><title>4489.995356916848</title></circle>
+        
+        <polyline points="290.0,22.3" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="290" cy="22.34541240939126" r="4" fill="#eaba78"><title>80253.73975373701</title></circle>
+        
+        <polyline points="338.0,22.0" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="338" cy="22" r="4" fill="#90baff"><title>80562.93349781599</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● row_by_row_tx </span><span style="color:#eaba78">● multivalue_insert </span><span style="color:#90baff">● unnest_prod </span>
+    </figure>
+    
+    <figure>
+      <figcaption>sensitive_filter_scaling · miss_us</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="sensitive_filter_scaling · miss_us">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">1475.76959</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">words_100</text><text x="220" y="135" text-anchor="middle">words_1000</text><text x="360" y="135" text-anchor="middle">words_5000</text><text x="500" y="135" text-anchor="middle">words_20000</text>
+        
+        <polyline points="80.0,112.0 220.0,111.6 360.0,109.9 500.0,103.6" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="111.95728540523727" r="4" fill="#83e7c1"><title>0.70041</title></circle>
+        
+        <circle cx="220" cy="111.59869284201743" r="4" fill="#83e7c1"><title>6.5804100000000005</title></circle>
+        
+        <circle cx="360" cy="109.90040883008031" r="4" fill="#83e7c1"><title>34.42792</title></circle>
+        
+        <circle cx="500" cy="103.63096001998524" r="4" fill="#83e7c1"><title>137.23083</title></circle>
+        
+        <polyline points="80.0,106.1 220.0,22.0" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="106.12166895240063" r="4" fill="#eaba78"><title>96.38958000000001</title></circle>
+        
+        <circle cx="220" cy="22" r="4" fill="#eaba78"><title>1475.76959</title></circle>
+        
+        <polyline points="80.0,111.9 220.0,111.9 360.0,111.9 500.0,111.9" fill="none" stroke="#90baff" stroke-width="2"/>
+        
+        <circle cx="80" cy="111.9175938433587" r="4" fill="#90baff"><title>1.35125</title></circle>
+        
+        <circle cx="220" cy="111.91667906641172" r="4" fill="#90baff"><title>1.36625</title></circle>
+        
+        <circle cx="360" cy="111.91352796475499" r="4" fill="#90baff"><title>1.41792</title></circle>
+        
+        <circle cx="500" cy="111.92000824464746" r="4" fill="#90baff"><title>1.31166</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● naive_contains </span><span style="color:#eaba78">● merged_regexp </span><span style="color:#90baff">● ac_prod </span>
+    </figure>
+    
+    <figure>
+      <figcaption>sensitive_filter_scaling · reload_p99_us</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="sensitive_filter_scaling · reload_p99_us">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">23408.709</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle">reload_5000</text>
+        
+        <polyline points="266.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="266" cy="22" r="4" fill="#83e7c1"><title>23408.709</title></circle>
+        
+        <polyline points="314.0,112.0" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="314" cy="111.96507838172536" r="4" fill="#eaba78"><title>9.083</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● rwmutex_rebuild_baseline </span><span style="color:#eaba78">● atomic_pointer_prod </span>
+    </figure>
+    
+    <figure>
+      <figcaption>redis_lua_atomicity · p50_us</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="redis_lua_atomicity · p50_us">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">34824</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">0s</text><text x="500" y="135" text-anchor="middle">2ms</text>
+        
+        <polyline points="80.0,103.2 500.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="103.17515937284631" r="4" fill="#83e7c1"><title>3414.625</title></circle>
+        
+        <circle cx="500" cy="22" r="4" fill="#83e7c1"><title>34824</title></circle>
+        
+        <polyline points="80.0,111.0 500.0,102.6" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="111.0013344245348" r="4" fill="#eaba78"><title>386.417</title></circle>
+        
+        <circle cx="500" cy="102.5833261543763" r="4" fill="#eaba78"><title>3643.625</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● multi_cmd_baseline </span><span style="color:#eaba78">● lua_evalsha_prod </span>
+    </figure>
+    
+    <figure>
+      <figcaption>redis_lua_atomicity · qps</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="redis_lua_atomicity · qps">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">2586.0954492142187</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">0s</text><text x="500" y="135" text-anchor="middle">2ms</text>
+        
+        <polyline points="80.0,101.7 500.0,111.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="101.73234067835178" r="4" fill="#83e7c1"><title>295.03496717551593</title></circle>
+        
+        <circle cx="500" cy="110.9743449526143" r="4" fill="#83e7c1"><title>29.47157611675259</title></circle>
+        
+        <polyline points="80.0,22.0 500.0,102.8" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="22" r="4" fill="#eaba78"><title>2586.0954492142187</title></circle>
+        
+        <circle cx="500" cy="102.78638546860839" r="4" fill="#eaba78"><title>264.74762900495386</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● multi_cmd_baseline </span><span style="color:#eaba78">● lua_evalsha_prod </span>
+    </figure>
+    
+    <figure>
+      <figcaption>redis_lua_atomicity · race_duplicate_rate</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="redis_lua_atomicity · race_duplicate_rate">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">0.21875</text><text x="45" y="113">0</text>
+        <text x="80" y="135" text-anchor="middle">0s</text><text x="500" y="135" text-anchor="middle">2ms</text>
+        
+        <polyline points="80.0,22.0 500.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="80" cy="22" r="4" fill="#83e7c1"><title>0.21875</title></circle>
+        
+        <circle cx="500" cy="22" r="4" fill="#83e7c1"><title>0.21875</title></circle>
+        
+        <polyline points="80.0,112.0 500.0,112.0" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="80" cy="112" r="4" fill="#eaba78"><title>0</title></circle>
+        
+        <circle cx="500" cy="112" r="4" fill="#eaba78"><title>0</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● multi_cmd_baseline </span><span style="color:#eaba78">● lua_evalsha_prod </span>
+    </figure>
+    
+    <figure>
+      <figcaption>live_source_singleflight · cold_upstream_calls</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="live_source_singleflight · cold_upstream_calls">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">120</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle">burst_120</text>
+        
+        <polyline points="266.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="266" cy="22" r="4" fill="#83e7c1"><title>120</title></circle>
+        
+        <polyline points="314.0,111.2" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="314" cy="111.25" r="4" fill="#eaba78"><title>1</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● direct_no_coalesce </span><span style="color:#eaba78">● prod_singleflight_cache </span>
+    </figure>
+    
+    <figure>
+      <figcaption>live_source_singleflight · warm_upstream_calls</figcaption>
+      <svg viewBox="0 0 560 144" role="img" aria-label="live_source_singleflight · warm_upstream_calls">
+        <path d="M65 22 V112 H520" fill="none" stroke="#727777"/>
+        <text x="2" y="25">120</text><text x="45" y="113">0</text>
+        <text x="290" y="135" text-anchor="middle">burst_120</text>
+        
+        <polyline points="266.0,22.0" fill="none" stroke="#83e7c1" stroke-width="2"/>
+        
+        <circle cx="266" cy="22" r="4" fill="#83e7c1"><title>120</title></circle>
+        
+        <polyline points="314.0,112.0" fill="none" stroke="#eaba78" stroke-width="2"/>
+        
+        <circle cx="314" cy="112" r="4" fill="#eaba78"><title>0</title></circle>
+        
+      </svg>
+      <span style="color:#83e7c1">● direct_no_coalesce </span><span style="color:#eaba78">● prod_singleflight_cache </span>
+    </figure>
+    
+  </section>
+  
+<h2>Scorecard</h2>
+<article><table>
+  <thead><tr><th>Experiment / load</th><th>Metric</th><th>Baseline → treatment</th><th>Medians</th><th>Change (%)</th><th>Δ 95% CI</th><th>Trade-off</th><th>Gate</th></tr></thead>
+  <tbody><tr><td>fanout_sweep low</td><td>frames</td><td>legacy → adaptive_batch</td><td>6400 → 6400</td><td>0</td><td>0 … 0</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep low</td><td>hot_p50_us</td><td>legacy → adaptive_batch</td><td>2545 → 2568</td><td>0.9037328094302577</td><td>-404 … 377</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep low</td><td>hot_p99_us</td><td>legacy → adaptive_batch</td><td>4361 → 4554</td><td>4.425590460903472</td><td>-1618 … 672</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep low</td><td>process_cpu_seconds_total</td><td>legacy → adaptive_batch</td><td>0.42537899999999995 → 0.45509499999999997</td><td>6.985770336570463</td><td>-0.00323699999999999 … 0.06653399999999998</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep low</td><td>frames</td><td>legacy → mixed_25pct_legacy</td><td>6400 → 6400</td><td>0</td><td>0 … 0</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep low</td><td>hot_p50_us</td><td>legacy → mixed_25pct_legacy</td><td>2545 → 2436</td><td>-4.282907662082513</td><td>-325 … 443</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep low</td><td>hot_p99_us</td><td>legacy → mixed_25pct_legacy</td><td>4361 → 4684</td><td>7.406558128869523</td><td>-1488 … 453</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep low</td><td>process_cpu_seconds_total</td><td>legacy → mixed_25pct_legacy</td><td>0.42537899999999995 → 0.443903</td><td>4.354704863192604</td><td>-0.01048899999999997 … 0.05908899999999995</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>frames</td><td>legacy → adaptive_batch</td><td>76800 → 76800</td><td>0</td><td>0 … 0</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>hot_p50_us</td><td>legacy → adaptive_batch</td><td>1839 → 1898</td><td>3.2082653616095635</td><td>-140 … 319</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>hot_p99_us</td><td>legacy → adaptive_batch</td><td>5650 → 5775</td><td>2.212389380530966</td><td>-897 … 693</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>process_cpu_seconds_total</td><td>legacy → adaptive_batch</td><td>1.479955 → 1.50575</td><td>1.7429584007621957</td><td>-0.013552999999999926 … 0.10365499999999983</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>frames</td><td>legacy → mixed_25pct_legacy</td><td>76800 → 76800</td><td>0</td><td>0 … 0</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>hot_p50_us</td><td>legacy → mixed_25pct_legacy</td><td>1839 → 1801</td><td>-2.066340402392608</td><td>-486 … 177</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>hot_p99_us</td><td>legacy → mixed_25pct_legacy</td><td>5650 → 4808</td><td>-14.902654867256636</td><td>-1605 … 3197</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep medium</td><td>process_cpu_seconds_total</td><td>legacy → mixed_25pct_legacy</td><td>1.479955 → 1.470658</td><td>-0.6281947761925144</td><td>-0.15128199999999992 … 0.06856299999999993</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>frames</td><td>legacy → adaptive_batch</td><td>313600 → 103712</td><td>-66.92857142857143</td><td>-213920 … -209664</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>hot_p50_us</td><td>legacy → adaptive_batch</td><td>1571 → 4807</td><td>205.98345003182686</td><td>2776 … 3440</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>hot_p99_us</td><td>legacy → adaptive_batch</td><td>9273 → 9837</td><td>6.082174053704303</td><td>-7963 … 5650</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>process_cpu_seconds_total</td><td>legacy → adaptive_batch</td><td>3.159016 → 1.547283</td><td>-51.020096131200354</td><td>-1.7611529999999997 … -1.5077820000000002</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>frames</td><td>legacy → mixed_25pct_legacy</td><td>313600 → 150808</td><td>-51.910714285714285</td><td>-164136 … -161616</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>hot_p50_us</td><td>legacy → mixed_25pct_legacy</td><td>1571 → 3411</td><td>117.12285168682368</td><td>1692 … 2044</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>hot_p99_us</td><td>legacy → mixed_25pct_legacy</td><td>9273 → 11451</td><td>23.487544483985758</td><td>-6349 … 18196</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>fanout_sweep high</td><td>process_cpu_seconds_total</td><td>legacy → mixed_25pct_legacy</td><td>3.159016 → 1.97927</td><td>-37.345363239692354</td><td>-1.323299 … -1.0833109999999997</td><td>Batching can increase hot-room latency while reducing frames.</td><td>PASS</td></tr><tr><td>isolation_stalled</td><td>cold_p99_us</td><td>baseline_single_shard_unbounded → protected_default</td><td>8902 → 6086</td><td>-31.633340822287124</td><td>-16945 … 3975</td><td>Bounded queues can disconnect stalled clients to limit resident memory.</td><td>PASS</td></tr><tr><td>isolation_stalled</td><td>rss_peak_bytes</td><td>baseline_single_shard_unbounded → protected_default</td><td>70189056 → 48103424</td><td>-31.465919701213817</td><td>-24100864 … -19759104</td><td>Bounded queues can disconnect stalled clients to limit resident memory.</td><td>PASS</td></tr><tr><td>migration_strategies</td><td>connect_peak_qps</td><td>crash → fixed</td><td>310 → 450</td><td>45.16129032258065</td><td>-80 … 190</td><td>Pacing handoffs spreads recovery requests and can extend drain time.</td><td>PASS</td></tr><tr><td>migration_strategies</td><td>drain_ms</td><td>crash → fixed</td><td>454 → 407.609</td><td>-10.21828193832599</td><td>-49.47000000000003 … -37.39100000000002</td><td>Pacing handoffs spreads recovery requests and can extend drain time.</td><td>PASS</td></tr><tr><td>migration_strategies</td><td>recent_peak_qps</td><td>crash → fixed</td><td>300 → 480</td><td>60.00000000000001</td><td>-80 … 210</td><td>Pacing handoffs spreads recovery requests and can extend drain time.</td><td>PASS</td></tr><tr><td>migration_strategies</td><td>connect_peak_qps</td><td>crash → bounded</td><td>310 → 80</td><td>-74.19354838709677</td><td>-270 … -190</td><td>Pacing handoffs spreads recovery requests and can extend drain time.</td><td>PASS</td></tr><tr><td>migration_strategies</td><td>drain_ms</td><td>crash → bounded</td><td>454 → 1905.344</td><td>319.679295154185</td><td>1447.342 … 1460.344</td><td>Pacing handoffs spreads recovery requests and can extend drain time.</td><td>PASS</td></tr><tr><td>migration_strategies</td><td>recent_peak_qps</td><td>crash → bounded</td><td>300 → 80</td><td>-73.33333333333334</td><td>-270 … -190</td><td>Pacing handoffs spreads recovery requests and can extend drain time.</td><td>PASS</td></tr><tr><td>history_pagination page_1</td><td>p50_us</td><td>offset_baseline → cursor_before_id_prod</td><td>518.583 → 514.333</td><td>-0.8195409413729315</td><td>-43.99899999999997 … 26.541999999999973</td><td>Cursor requires the previous page boundary. OFFSET supports arbitrary page jumps.</td><td>PASS</td></tr><tr><td>history_pagination page_200</td><td>p50_us</td><td>offset_baseline → cursor_before_id_prod</td><td>9178.834 → 533.834</td><td>-94.18407610378398</td><td>-8821.625 … -8542.249</td><td>Cursor requires the previous page boundary. OFFSET supports arbitrary page jumps.</td><td>PASS</td></tr><tr><td>history_pagination page_1000</td><td>p50_us</td><td>offset_baseline → cursor_before_id_prod</td><td>37609.5 → 523.292</td><td>-98.60861750355629</td><td>-40292.416 … -36738.208</td><td>Cursor requires the previous page boundary. OFFSET supports arbitrary page jumps.</td><td>PASS</td></tr><tr><td>history_pagination page_2000</td><td>p50_us</td><td>offset_baseline → cursor_before_id_prod</td><td>90843.583 → 581.542</td><td>-99.35984251083535</td><td>-90488.583 … -89323.541</td><td>Cursor requires the previous page boundary. OFFSET supports arbitrary page jumps.</td><td>PASS</td></tr><tr><td>history_pagination page_3600</td><td>p50_us</td><td>offset_baseline → cursor_before_id_prod</td><td>162105.792 → 552.792</td><td>-99.65899306053173</td><td>-161930.874 … -160003.95799999998</td><td>Cursor requires the previous page boundary. OFFSET supports arbitrary page jumps.</td><td>PASS</td></tr><tr><td>pg_archive_write batch_128</td><td>rows_per_second</td><td>row_by_row_tx → multivalue_insert</td><td>4489.995356916848 → 80253.73975373701</td><td>1687.3902615535212</td><td>72049.12106475988 … 78096.71060295602</td><td>UNNEST builds client arrays but uses five bind parameters per batch.</td><td>PASS</td></tr><tr><td>pg_archive_write batch_128</td><td>rows_per_second</td><td>row_by_row_tx → unnest_prod</td><td>4489.995356916848 → 80562.93349781599</td><td>1694.2765435983936</td><td>68263.11299121815 … 77148.9925357215</td><td>UNNEST builds client arrays but uses five bind parameters per batch.</td><td>PASS</td></tr><tr><td>redis_lua_atomicity 0s</td><td>p50_us</td><td>multi_cmd_baseline → lua_evalsha_prod</td><td>3414.625 → 386.417</td><td>-88.68347183072812</td><td>-3203.042 … -2296.583</td><td>Lua serializes policy and publication on the Redis server within one round trip.</td><td>PASS</td></tr><tr><td>redis_lua_atomicity 0s</td><td>qps</td><td>multi_cmd_baseline → lua_evalsha_prod</td><td>295.03496717551593 → 2586.0954492142187</td><td>776.5386265810838</td><td>1994.1551537760597 … 2489.7683796059755</td><td>Lua serializes policy and publication on the Redis server within one round trip.</td><td>PASS</td></tr><tr><td>redis_lua_atomicity 0s</td><td>race_duplicate_rate</td><td>multi_cmd_baseline → lua_evalsha_prod</td><td>0.21875 → 0</td><td>-100</td><td>-0.21875 … -0.21875</td><td>Lua serializes policy and publication on the Redis server within one round trip.</td><td>PASS</td></tr><tr><td>redis_lua_atomicity 2ms</td><td>p50_us</td><td>multi_cmd_baseline → lua_evalsha_prod</td><td>34824 → 3643.625</td><td>-89.5370290604181</td><td>-31794.708 … -29355.083</td><td>Lua serializes policy and publication on the Redis server within one round trip.</td><td>PASS</td></tr><tr><td>redis_lua_atomicity 2ms</td><td>qps</td><td>multi_cmd_baseline → lua_evalsha_prod</td><td>29.47157611675259 → 264.74762900495386</td><td>798.315135763855</td><td>202.58418105245454 … 243.5373298678448</td><td>Lua serializes policy and publication on the Redis server within one round trip.</td><td>PASS</td></tr><tr><td>redis_lua_atomicity 2ms</td><td>race_duplicate_rate</td><td>multi_cmd_baseline → lua_evalsha_prod</td><td>0.21875 → 0</td><td>-100</td><td>-0.21875 … -0.21875</td><td>Lua serializes policy and publication on the Redis server within one round trip.</td><td>PASS</td></tr><tr><td>sensitive_filter_scaling words_100</td><td>miss_us</td><td>naive_contains → merged_regexp</td><td>0.70041 → 96.38958000000001</td><td>13661.879470595795</td><td>95.11417 … 107.72124999999998</td><td>AC builds a trie before matching. Regexp is limited to 1,000 alternatives to bound compilation and scan costs.</td><td>PASS</td></tr><tr><td>sensitive_filter_scaling words_100</td><td>miss_us</td><td>naive_contains → ac_prod</td><td>0.70041 → 1.35125</td><td>92.92271669450751</td><td>0.5320900000000001 … 0.75292</td><td>AC builds a trie before matching. Regexp is limited to 1,000 alternatives to bound compilation and scan costs.</td><td>PASS</td></tr><tr><td>sensitive_filter_scaling words_1000</td><td>miss_us</td><td>naive_contains → merged_regexp</td><td>6.5804100000000005 → 1475.76959</td><td>22326.711861418968</td><td>1448.2450099999999 … 1621.16959</td><td>AC builds a trie before matching. Regexp is limited to 1,000 alternatives to bound compilation and scan costs.</td><td>PASS</td></tr><tr><td>sensitive_filter_scaling words_1000</td><td>miss_us</td><td>naive_contains → ac_prod</td><td>6.5804100000000005 → 1.36625</td><td>-79.23761589323462</td><td>-5.56583 … -4.98167</td><td>AC builds a trie before matching. Regexp is limited to 1,000 alternatives to bound compilation and scan costs.</td><td>PASS</td></tr><tr><td>sensitive_filter_scaling words_5000</td><td>miss_us</td><td>naive_contains → ac_prod</td><td>34.42792 → 1.41792</td><td>-95.88148223883405</td><td>-33.39834 … -32.359159999999996</td><td>AC builds a trie before matching. Regexp is limited to 1,000 alternatives to bound compilation and scan costs.</td><td>PASS</td></tr><tr><td>sensitive_filter_scaling words_20000</td><td>miss_us</td><td>naive_contains → ac_prod</td><td>137.23083 → 1.31166</td><td>-99.04419436944308</td><td>-137.46875 … -132.63959</td><td>AC builds a trie before matching. Regexp is limited to 1,000 alternatives to bound compilation and scan costs.</td><td>PASS</td></tr><tr><td>sensitive_filter_scaling reload_5000</td><td>reload_p99_us</td><td>rwmutex_rebuild_baseline → atomic_pointer_prod</td><td>23408.709 → 9.083</td><td>-99.96119820191707</td><td>-30656.958000000002 … -18749.417</td><td>Atomic reload temporarily retains old and new tries.</td><td>PASS</td></tr><tr><td>live_source_singleflight burst_120</td><td>cold_upstream_calls</td><td>direct_no_coalesce → prod_singleflight_cache</td><td>120 → 1</td><td>-99.16666666666667</td><td>-119 … -119</td><td>Live results may remain cached for 15 seconds.</td><td>PASS</td></tr><tr><td>live_source_singleflight burst_120</td><td>warm_upstream_calls</td><td>direct_no_coalesce → prod_singleflight_cache</td><td>120 → 0</td><td>-100</td><td>-120 … -120</td><td>Live results may remain cached for 15 seconds.</td><td>PASS</td></tr></tbody>
+</table></article>
+
+  
+<h2>fanout_sweep low · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>legacy</td><td>achieved_rate</td><td>99.96940311455926</td><td>99.92555546118142 … 99.9847835657511</td><td>5</td></tr><tr><td>legacy</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_p99_us</td><td>4356</td><td>4319 … 6430</td><td>5</td></tr><tr><td>legacy</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>legacy</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>400</td><td>400 … 400</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.0020640029999999987</td><td>0.0018074569999999993 … 0.0027543360000000005</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>10400</td><td>10400 … 10400</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>expected</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>legacy</td><td>frames</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>legacy</td><td>go_gc_duration_seconds_sum</td><td>0.000534917</td><td>0.00045587499999999995 … 0.00056054</td><td>5</td></tr><tr><td>legacy</td><td>go_goroutines</td><td>-1</td><td>-1 … -1</td><td>5</td></tr><tr><td>legacy</td><td>go_memstats_alloc_bytes_total</td><td>13950304</td><td>12850456 … 15077984</td><td>5</td></tr><tr><td>legacy</td><td>hot_p50_us</td><td>2545</td><td>2252 … 2557</td><td>5</td></tr><tr><td>legacy</td><td>hot_p99_us</td><td>4361</td><td>4238 … 6172</td><td>5</td></tr><tr><td>legacy</td><td>hot_samples</td><td>1600</td><td>1600 … 1600</td><td>5</td></tr><tr><td>legacy</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>payload_bytes</td><td>2194528</td><td>2193312 … 2195040</td><td>5</td></tr><tr><td>legacy</td><td>process_cpu_seconds_total</td><td>0.42537899999999995</td><td>0.410401 … 0.45439199999999996</td><td>5</td></tr><tr><td>legacy</td><td>process_resident_memory_bytes</td><td>11042816</td><td>10928128 … 12156928</td><td>5</td></tr><tr><td>legacy</td><td>received</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>legacy</td><td>rss_peak_bytes</td><td>35504128</td><td>35127296 … 36454400</td><td>5</td></tr><tr><td>legacy</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>legacy</td><td>target_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>legacy</td><td>viewers</td><td>32</td><td>32 … 32</td><td>5</td></tr><tr><td>legacy</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>achieved_rate</td><td>99.92879863246961</td><td>99.89606643424868 … 99.96436060619234</td><td>5</td></tr><tr><td>adaptive_batch</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_p99_us</td><td>4294</td><td>4151 … 4975</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>400</td><td>400 … 400</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.002245031999999999</td><td>0.0020938669999999997 … 0.006586754999999999</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>10400</td><td>10400 … 10400</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>expected</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>adaptive_batch</td><td>frames</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_gc_duration_seconds_sum</td><td>0.000485752</td><td>0.00046520599999999996 … 0.000680041</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_goroutines</td><td>-1</td><td>-2 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_memstats_alloc_bytes_total</td><td>14944320</td><td>13915848 … 17131776</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_p50_us</td><td>2568</td><td>2141 … 2655</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_p99_us</td><td>4554</td><td>4070 … 5033</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_samples</td><td>1600</td><td>1600 … 1600</td><td>5</td></tr><tr><td>adaptive_batch</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>payload_bytes</td><td>2194528</td><td>2193472 … 2195072</td><td>5</td></tr><tr><td>adaptive_batch</td><td>process_cpu_seconds_total</td><td>0.45509499999999997</td><td>0.427374 … 0.47990000000000005</td><td>5</td></tr><tr><td>adaptive_batch</td><td>process_resident_memory_bytes</td><td>11354112</td><td>10862592 … 12877824</td><td>5</td></tr><tr><td>adaptive_batch</td><td>received</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>adaptive_batch</td><td>rss_peak_bytes</td><td>35504128</td><td>35258368 … 36323328</td><td>5</td></tr><tr><td>adaptive_batch</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>adaptive_batch</td><td>target_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>adaptive_batch</td><td>viewers</td><td>32</td><td>32 … 32</td><td>5</td></tr><tr><td>adaptive_batch</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>achieved_rate</td><td>99.93463235723661</td><td>99.90544783572838 … 99.99074255708186</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_p99_us</td><td>4463</td><td>4178 … 5071</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>600</td><td>600 … 600</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.005898161999999998</td><td>0.004771898000000002 … 0.010692086</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>10400</td><td>10400 … 10400</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>expected</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>frames</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_gc_duration_seconds_sum</td><td>0.00043187399999999995</td><td>0.000352125 … 0.000519334</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_goroutines</td><td>-1</td><td>-2 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_memstats_alloc_bytes_total</td><td>13304040</td><td>12465192 … 15162280</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_p50_us</td><td>2436</td><td>2220 … 2773</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_p99_us</td><td>4684</td><td>4445 … 4799</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_samples</td><td>1600</td><td>1600 … 1600</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>payload_bytes</td><td>2194784</td><td>2194208 … 2195072</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>process_cpu_seconds_total</td><td>0.443903</td><td>0.432319 … 0.48271800000000004</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>process_resident_memory_bytes</td><td>11468800</td><td>11337728 … 12435456</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>received</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>rss_peak_bytes</td><td>35930112</td><td>35766272 … 36765696</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>target_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>viewers</td><td>32</td><td>32 … 32</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>fanout_sweep medium · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>legacy</td><td>achieved_rate</td><td>399.9496731327807</td><td>399.9205407875523 … 399.99181676741665</td><td>5</td></tr><tr><td>legacy</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_p99_us</td><td>5345</td><td>4736 … 6238</td><td>5</td></tr><tr><td>legacy</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>legacy</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>1000</td><td>1000 … 1000</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.005692271000000006</td><td>0.003711663 … 0.008407141000000003</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>80800</td><td>80800 … 80800</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>expected</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>legacy</td><td>frames</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>legacy</td><td>go_gc_duration_seconds_sum</td><td>0.000498333</td><td>0.00048633399999999994 … 0.0005543340000000001</td><td>5</td></tr><tr><td>legacy</td><td>go_goroutines</td><td>0</td><td>-1 … 0</td><td>5</td></tr><tr><td>legacy</td><td>go_memstats_alloc_bytes_total</td><td>20587296</td><td>19673392 … 21253808</td><td>5</td></tr><tr><td>legacy</td><td>hot_p50_us</td><td>1839</td><td>1658 … 2038</td><td>5</td></tr><tr><td>legacy</td><td>hot_p99_us</td><td>5650</td><td>5199 … 5997</td><td>5</td></tr><tr><td>legacy</td><td>hot_samples</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>legacy</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>payload_bytes</td><td>26373696</td><td>26367744 … 26378784</td><td>5</td></tr><tr><td>legacy</td><td>process_cpu_seconds_total</td><td>1.479955</td><td>1.402095 … 1.4969180000000002</td><td>5</td></tr><tr><td>legacy</td><td>process_resident_memory_bytes</td><td>17235968</td><td>15613952 … 18038784</td><td>5</td></tr><tr><td>legacy</td><td>received</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>legacy</td><td>rss_peak_bytes</td><td>41287680</td><td>39976960 … 42221568</td><td>5</td></tr><tr><td>legacy</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>legacy</td><td>target_rate</td><td>400</td><td>400 … 400</td><td>5</td></tr><tr><td>legacy</td><td>viewers</td><td>96</td><td>96 … 96</td><td>5</td></tr><tr><td>legacy</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>achieved_rate</td><td>399.969377344547</td><td>399.948340072732 … 399.9854171316695</td><td>5</td></tr><tr><td>adaptive_batch</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_p99_us</td><td>5519</td><td>4982 … 5910</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>1000</td><td>1000 … 1000</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.005472525999999999</td><td>0.004999549000000003 … 0.006146392000000006</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>80800</td><td>80800 … 80800</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>expected</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>adaptive_batch</td><td>frames</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_gc_duration_seconds_sum</td><td>0.000532626</td><td>0.000382128 … 0.0008848339999999999</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_goroutines</td><td>0</td><td>-1 … 1</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_memstats_alloc_bytes_total</td><td>19892776</td><td>19449776 … 21405600</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_p50_us</td><td>1898</td><td>1869 … 2158</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_p99_us</td><td>5775</td><td>4753 … 6196</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_samples</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>adaptive_batch</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>payload_bytes</td><td>26376288</td><td>26373888 … 26379072</td><td>5</td></tr><tr><td>adaptive_batch</td><td>process_cpu_seconds_total</td><td>1.50575</td><td>1.466402 … 1.5262879999999999</td><td>5</td></tr><tr><td>adaptive_batch</td><td>process_resident_memory_bytes</td><td>16433152</td><td>15859712 … 17793024</td><td>5</td></tr><tr><td>adaptive_batch</td><td>received</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>adaptive_batch</td><td>rss_peak_bytes</td><td>40747008</td><td>39993344 … 41861120</td><td>5</td></tr><tr><td>adaptive_batch</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>adaptive_batch</td><td>target_rate</td><td>400</td><td>400 … 400</td><td>5</td></tr><tr><td>adaptive_batch</td><td>viewers</td><td>96</td><td>96 … 96</td><td>5</td></tr><tr><td>adaptive_batch</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>achieved_rate</td><td>399.94663212127637</td><td>399.9451825134218 … 399.9842422207935</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_p99_us</td><td>5373</td><td>3436 … 13592</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>1800</td><td>1800 … 1800</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.027345919</td><td>0.02017515499999999 … 0.03007777399999998</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>80800</td><td>80800 … 80800</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>expected</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>frames</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_gc_duration_seconds_sum</td><td>0.00048291800000000004</td><td>0.000395251 … 0.00065825</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_goroutines</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_memstats_alloc_bytes_total</td><td>20984752</td><td>16785904 … 23344960</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_p50_us</td><td>1801</td><td>1441 … 1859</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_p99_us</td><td>4808</td><td>4129 … 8847</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_samples</td><td>6400</td><td>6400 … 6400</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>payload_bytes</td><td>26376768</td><td>26374176 … 26379840</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>process_cpu_seconds_total</td><td>1.470658</td><td>1.328673 … 1.493655</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>process_resident_memory_bytes</td><td>16596992</td><td>15319040 … 17219584</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>received</td><td>76800</td><td>76800 … 76800</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>rss_peak_bytes</td><td>40599552</td><td>39796736 … 41320448</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>target_rate</td><td>400</td><td>400 … 400</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>viewers</td><td>96</td><td>96 … 96</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>fanout_sweep high · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>legacy</td><td>achieved_rate</td><td>699.9863837148669</td><td>699.8854125106321 … 699.9937916050636</td><td>5</td></tr><tr><td>legacy</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>cold_p99_us</td><td>9390</td><td>4407 … 13966</td><td>5</td></tr><tr><td>legacy</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>legacy</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>legacy</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>1600</td><td>1600 … 1600</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.005895526999999998</td><td>0.0038570249999999935 … 0.011110376000000102</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>317600</td><td>317600 … 317600</td><td>5</td></tr><tr><td>legacy</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>expected</td><td>313600</td><td>313600 … 313600</td><td>5</td></tr><tr><td>legacy</td><td>frames</td><td>313600</td><td>313600 … 313600</td><td>5</td></tr><tr><td>legacy</td><td>go_gc_duration_seconds_sum</td><td>0.000446958</td><td>0.000355252 … 0.000548289</td><td>5</td></tr><tr><td>legacy</td><td>go_goroutines</td><td>0</td><td>-1 … 0</td><td>5</td></tr><tr><td>legacy</td><td>go_memstats_alloc_bytes_total</td><td>27908008</td><td>26659144 … 30389488</td><td>5</td></tr><tr><td>legacy</td><td>hot_p50_us</td><td>1571</td><td>1367 … 1697</td><td>5</td></tr><tr><td>legacy</td><td>hot_p99_us</td><td>9273</td><td>4187 … 17800</td><td>5</td></tr><tr><td>legacy</td><td>hot_samples</td><td>11200</td><td>11200 … 11200</td><td>5</td></tr><tr><td>legacy</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>legacy</td><td>payload_bytes</td><td>107823968</td><td>107819040 … 107831136</td><td>5</td></tr><tr><td>legacy</td><td>process_cpu_seconds_total</td><td>3.159016</td><td>3.0814500000000002 … 3.243673</td><td>5</td></tr><tr><td>legacy</td><td>process_resident_memory_bytes</td><td>25264128</td><td>23281664 … 26279936</td><td>5</td></tr><tr><td>legacy</td><td>received</td><td>313600</td><td>313600 … 313600</td><td>5</td></tr><tr><td>legacy</td><td>rss_peak_bytes</td><td>48988160</td><td>47628288 … 49823744</td><td>5</td></tr><tr><td>legacy</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>legacy</td><td>target_rate</td><td>700</td><td>700 … 700</td><td>5</td></tr><tr><td>legacy</td><td>viewers</td><td>224</td><td>224 … 224</td><td>5</td></tr><tr><td>legacy</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>achieved_rate</td><td>699.9509346893907</td><td>699.9243394287728 … 699.9936603574164</td><td>5</td></tr><tr><td>adaptive_batch</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_p99_us</td><td>3922</td><td>3136 … 5366</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>663</td><td>645 … 664</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.0015791249999999976</td><td>0.0008786519999999988 … 0.0019061959999999976</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>61152</td><td>60928 … 63616</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>46560</td><td>40064 … 47008</td><td>5</td></tr><tr><td>adaptive_batch</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>expected</td><td>313600</td><td>313600 … 313600</td><td>5</td></tr><tr><td>adaptive_batch</td><td>frames</td><td>103712</td><td>99680 … 103936</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_gc_duration_seconds_sum</td><td>0.000379085</td><td>0.000321044 … 0.000456375</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_goroutines</td><td>0</td><td>-1 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>go_memstats_alloc_bytes_total</td><td>28100056</td><td>26843768 … 29452248</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_p50_us</td><td>4807</td><td>4347 … 4870</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_p99_us</td><td>9837</td><td>9356 … 11316</td><td>5</td></tr><tr><td>adaptive_batch</td><td>hot_samples</td><td>11200</td><td>11200 … 11200</td><td>5</td></tr><tr><td>adaptive_batch</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>adaptive_batch</td><td>payload_bytes</td><td>108153024</td><td>108134880 … 108165120</td><td>5</td></tr><tr><td>adaptive_batch</td><td>process_cpu_seconds_total</td><td>1.547283</td><td>1.456989 … 1.608232</td><td>5</td></tr><tr><td>adaptive_batch</td><td>process_resident_memory_bytes</td><td>24428544</td><td>23724032 … 25034752</td><td>5</td></tr><tr><td>adaptive_batch</td><td>received</td><td>313600</td><td>313600 … 313600</td><td>5</td></tr><tr><td>adaptive_batch</td><td>rss_peak_bytes</td><td>48660480</td><td>47120384 … 49135616</td><td>5</td></tr><tr><td>adaptive_batch</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>adaptive_batch</td><td>target_rate</td><td>700</td><td>700 … 700</td><td>5</td></tr><tr><td>adaptive_batch</td><td>viewers</td><td>224</td><td>224 … 224</td><td>5</td></tr><tr><td>adaptive_batch</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>achieved_rate</td><td>699.9775757183778</td><td>699.9225170275366 … 699.9900001428551</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_p99_us</td><td>8502</td><td>3302 … 25761</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>2031</td><td>2023 … 2038</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.008194492999999985</td><td>0.005801187000000016 … 0.009281716999999974</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>48384</td><td>48048 … 49896</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>105752</td><td>103736 … 107936</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>expected</td><td>313600</td><td>313600 … 313600</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>frames</td><td>150808</td><td>149464 … 151984</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_gc_duration_seconds_sum</td><td>0.000499165</td><td>0.00044649899999999994 … 0.001170501</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_goroutines</td><td>0</td><td>0 … 2</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>go_memstats_alloc_bytes_total</td><td>28841576</td><td>27893408 … 30083256</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_p50_us</td><td>3411</td><td>3263 … 3520</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_p99_us</td><td>11451</td><td>8426 … 27469</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>hot_samples</td><td>11200</td><td>11200 … 11200</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>payload_bytes</td><td>108077872</td><td>108061072 … 108090920</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>process_cpu_seconds_total</td><td>1.97927</td><td>1.8948429999999998 … 2.004198</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>process_resident_memory_bytes</td><td>24608768</td><td>23625728 … 26247168</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>received</td><td>313600</td><td>313600 … 313600</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>rss_peak_bytes</td><td>48873472</td><td>47054848 … 50544640</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>target_rate</td><td>700</td><td>700 … 700</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>viewers</td><td>224</td><td>224 … 224</td><td>5</td></tr><tr><td>mixed_25pct_legacy</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>isolation_stalled · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>baseline_single_shard_unbounded</td><td>achieved_rate</td><td>799.9744008191738</td><td>799.9671013529568 … 799.9919668806644</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_p99_us</td><td>8902</td><td>4386 … 23031</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>2225</td><td>2208 … 2238</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.009753839999999995</td><td>0.009079964000000005 … 0.011944197999999961</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>49600</td><td>49440 … 50400</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>41602</td><td>38081 … 43849</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>expected</td><td>256000</td><td>256000 … 256000</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>frames</td><td>68000</td><td>65280 … 70080</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>go_gc_duration_seconds_sum</td><td>0.00046903999999999994</td><td>0.00042175 … 0.000572626</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>go_goroutines</td><td>0</td><td>-1 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>go_memstats_alloc_bytes_total</td><td>47292504</td><td>45187152 … 48799928</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>hot_p50_us</td><td>4499</td><td>4369 … 4642</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>hot_p99_us</td><td>11077</td><td>9850 … 24154</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>hot_samples</td><td>12800</td><td>12800 … 12800</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>payload_bytes</td><td>88336160</td><td>88315360 … 88346720</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>process_cpu_seconds_total</td><td>1.642194</td><td>1.5075109999999998 … 1.7136779999999998</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>process_resident_memory_bytes</td><td>46874624</td><td>44253184 … 47513600</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>received</td><td>256000</td><td>256000 … 256000</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>rss_peak_bytes</td><td>70189056</td><td>67862528 … 71532544</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>target_rate</td><td>800</td><td>800 … 800</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>viewers</td><td>160</td><td>160 … 160</td><td>5</td></tr><tr><td>baseline_single_shard_unbounded</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>achieved_rate</td><td>799.9865002278086</td><td>799.9698847337042 … 799.997116810391</td><td>5</td></tr><tr><td>protected_default</td><td>affected</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>cold_duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>cold_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>cold_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>cold_p99_us</td><td>6086</td><td>4634 … 8762</td><td>5</td></tr><tr><td>protected_default</td><td>cold_rate</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>protected_default</td><td>cold_received</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>protected_default</td><td>cold_samples</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>protected_default</td><td>cold_unique</td><td>200</td><td>200 … 200</td><td>5</td></tr><tr><td>protected_default</td><td>cursor_gaps</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>2222</td><td>2216 … 2235</td><td>5</td></tr><tr><td>protected_default</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.008627655999999992</td><td>0.005915971000000013 … 0.012640569999999966</td><td>5</td></tr><tr><td>protected_default</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>50240</td><td>49600 … 51840</td><td>5</td></tr><tr><td>protected_default</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>40487</td><td>39041 … 43204</td><td>5</td></tr><tr><td>protected_default</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>duplicates</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>expected</td><td>256000</td><td>256000 … 256000</td><td>5</td></tr><tr><td>protected_default</td><td>frames</td><td>67520</td><td>66560 … 69600</td><td>5</td></tr><tr><td>protected_default</td><td>go_gc_duration_seconds_sum</td><td>0.000530291</td><td>0.000323166 … 0.000642334</td><td>5</td></tr><tr><td>protected_default</td><td>go_goroutines</td><td>0</td><td>-1 … 1</td><td>5</td></tr><tr><td>protected_default</td><td>go_memstats_alloc_bytes_total</td><td>31460112</td><td>29480056 … 33047456</td><td>5</td></tr><tr><td>protected_default</td><td>hot_p50_us</td><td>4563</td><td>4523 … 4610</td><td>5</td></tr><tr><td>protected_default</td><td>hot_p99_us</td><td>10712</td><td>9432 … 13025</td><td>5</td></tr><tr><td>protected_default</td><td>hot_samples</td><td>12800</td><td>12800 … 12800</td><td>5</td></tr><tr><td>protected_default</td><td>missing</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>protected_default</td><td>payload_bytes</td><td>88330720</td><td>88304960 … 88341440</td><td>5</td></tr><tr><td>protected_default</td><td>process_cpu_seconds_total</td><td>1.571771</td><td>1.505649 … 1.651275</td><td>5</td></tr><tr><td>protected_default</td><td>process_resident_memory_bytes</td><td>24363008</td><td>23134208 … 24821760</td><td>5</td></tr><tr><td>protected_default</td><td>received</td><td>256000</td><td>256000 … 256000</td><td>5</td></tr><tr><td>protected_default</td><td>rss_peak_bytes</td><td>48103424</td><td>47349760 … 48660480</td><td>5</td></tr><tr><td>protected_default</td><td>seconds</td><td>2</td><td>2 … 2</td><td>5</td></tr><tr><td>protected_default</td><td>target_rate</td><td>800</td><td>800 … 800</td><td>5</td></tr><tr><td>protected_default</td><td>viewers</td><td>160</td><td>160 … 160</td><td>5</td></tr><tr><td>protected_default</td><td>worst_missing</td><td>0</td><td>0 … 0</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>migration_strategies · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>crash</td><td>complete_viewers</td><td>144</td><td>144 … 144</td><td>5</td></tr><tr><td>crash</td><td>connect_peak_qps</td><td>310</td><td>270 … 350</td><td>5</td></tr><tr><td>crash</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>24</td><td>24 … 24</td><td>5</td></tr><tr><td>crash</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.000171127</td><td>0.000129083 … 0.000182377</td><td>5</td></tr><tr><td>crash</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>crash</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>crash</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>crash</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>3214</td><td>3208 … 3225</td><td>5</td></tr><tr><td>crash</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>crash</td><td>drain_ms</td><td>454</td><td>445 … 456</td><td>5</td></tr><tr><td>crash</td><td>events</td><td>24</td><td>24 … 24</td><td>5</td></tr><tr><td>crash</td><td>go_gc_duration_seconds_sum</td><td>0.000885791</td><td>0.000331918 … 0.001350583</td><td>5</td></tr><tr><td>crash</td><td>go_goroutines</td><td>6</td><td>5 … 6</td><td>5</td></tr><tr><td>crash</td><td>go_memstats_alloc_bytes_total</td><td>8276832</td><td>7425688 … 8479424</td><td>5</td></tr><tr><td>crash</td><td>invited</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>crash</td><td>last_handoff_ms</td><td>454</td><td>445 … 456</td><td>5</td></tr><tr><td>crash</td><td>migrating_delivery_p50_us</td><td>4356</td><td>4200 … 4449</td><td>5</td></tr><tr><td>crash</td><td>migrating_delivery_p95_us</td><td>169787</td><td>161924 … 182740</td><td>5</td></tr><tr><td>crash</td><td>migrating_delivery_p99_us</td><td>403970</td><td>378716 … 416493</td><td>5</td></tr><tr><td>crash</td><td>migrating_delivery_samples</td><td>1584</td><td>1584 … 1584</td><td>5</td></tr><tr><td>crash</td><td>moved</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>crash</td><td>peak_attempts_per_sec</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>crash</td><td>process_cpu_seconds_total</td><td>0.22381299999999998</td><td>0.205347 … 0.243033</td><td>5</td></tr><tr><td>crash</td><td>process_resident_memory_bytes</td><td>11599872</td><td>7503872 … 11829248</td><td>5</td></tr><tr><td>crash</td><td>recent_peak_qps</td><td>300</td><td>270 … 350</td><td>5</td></tr><tr><td>crash</td><td>recovery_p50_ms</td><td>299</td><td>265 … 325</td><td>5</td></tr><tr><td>crash</td><td>recovery_p95_ms</td><td>445</td><td>426 … 449</td><td>5</td></tr><tr><td>crash</td><td>recovery_p99_ms</td><td>450</td><td>440 … 451</td><td>5</td></tr><tr><td>crash</td><td>recovery_samples</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>crash</td><td>resident_delivery_p50_us</td><td>4241</td><td>4149 … 4333</td><td>5</td></tr><tr><td>crash</td><td>resident_delivery_p95_us</td><td>5345</td><td>5089 … 5588</td><td>5</td></tr><tr><td>crash</td><td>resident_delivery_p99_ms</td><td>5</td><td>5 … 7</td><td>5</td></tr><tr><td>crash</td><td>resident_delivery_p99_us</td><td>5978</td><td>5279 … 7012</td><td>5</td></tr><tr><td>crash</td><td>resident_delivery_samples</td><td>1584</td><td>1584 … 1584</td><td>5</td></tr><tr><td>crash</td><td>resident_during_handoff_p50_us</td><td>2575</td><td>1632 … 3704</td><td>5</td></tr><tr><td>crash</td><td>resident_during_handoff_p95_us</td><td>4641</td><td>1758 … 5509</td><td>5</td></tr><tr><td>crash</td><td>resident_during_handoff_p99_us</td><td>4716</td><td>1854 … 5590</td><td>5</td></tr><tr><td>crash</td><td>resident_during_handoff_samples</td><td>144</td><td>144 … 144</td><td>5</td></tr><tr><td>crash</td><td>source_exit_ms</td><td>5.157</td><td>2.614 … 5.79</td><td>5</td></tr><tr><td>crash</td><td>viewers</td><td>144</td><td>144 … 144</td><td>5</td></tr><tr><td>fixed</td><td>complete_viewers</td><td>144</td><td>144 … 144</td><td>5</td></tr><tr><td>fixed</td><td>connect_peak_qps</td><td>450</td><td>240 … 480</td><td>5</td></tr><tr><td>fixed</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>24</td><td>24 … 24</td><td>5</td></tr><tr><td>fixed</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.000147252</td><td>0.00014370699999999997 … 0.00016249700000000005</td><td>5</td></tr><tr><td>fixed</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>fixed</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>fixed</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>fixed</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>3240</td><td>3240 … 3240</td><td>5</td></tr><tr><td>fixed</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>fixed</td><td>drain_ms</td><td>407.609</td><td>404.541 … 409.234</td><td>5</td></tr><tr><td>fixed</td><td>events</td><td>24</td><td>24 … 24</td><td>5</td></tr><tr><td>fixed</td><td>go_gc_duration_seconds_sum</td><td>0.001164499</td><td>0.000627333 … 0.002250168</td><td>5</td></tr><tr><td>fixed</td><td>go_goroutines</td><td>24</td><td>23 … 24</td><td>5</td></tr><tr><td>fixed</td><td>go_memstats_alloc_bytes_total</td><td>8406760</td><td>7356632 … 9329032</td><td>5</td></tr><tr><td>fixed</td><td>invited</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>fixed</td><td>last_handoff_ms</td><td>316</td><td>306 … 317</td><td>5</td></tr><tr><td>fixed</td><td>migrating_delivery_p50_us</td><td>4267</td><td>4022 … 4534</td><td>5</td></tr><tr><td>fixed</td><td>migrating_delivery_p95_us</td><td>5523</td><td>5088 … 5971</td><td>5</td></tr><tr><td>fixed</td><td>migrating_delivery_p99_us</td><td>6332</td><td>5448 … 10142</td><td>5</td></tr><tr><td>fixed</td><td>migrating_delivery_samples</td><td>1584</td><td>1584 … 1584</td><td>5</td></tr><tr><td>fixed</td><td>moved</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>fixed</td><td>peak_attempts_per_sec</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>fixed</td><td>process_cpu_seconds_total</td><td>0.184971</td><td>0.175184 … 0.188064</td><td>5</td></tr><tr><td>fixed</td><td>process_resident_memory_bytes</td><td>12468224</td><td>12140544 … 12779520</td><td>5</td></tr><tr><td>fixed</td><td>recent_peak_qps</td><td>480</td><td>240 … 480</td><td>5</td></tr><tr><td>fixed</td><td>recovery_p50_ms</td><td>12</td><td>5 … 17</td><td>5</td></tr><tr><td>fixed</td><td>recovery_p95_ms</td><td>14</td><td>8 … 20</td><td>5</td></tr><tr><td>fixed</td><td>recovery_p99_ms</td><td>15</td><td>8 … 20</td><td>5</td></tr><tr><td>fixed</td><td>recovery_samples</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>fixed</td><td>resident_delivery_p50_us</td><td>4305</td><td>4044 … 4495</td><td>5</td></tr><tr><td>fixed</td><td>resident_delivery_p95_us</td><td>5493</td><td>4958 … 5918</td><td>5</td></tr><tr><td>fixed</td><td>resident_delivery_p99_ms</td><td>6</td><td>5 … 9</td><td>5</td></tr><tr><td>fixed</td><td>resident_delivery_p99_us</td><td>6266</td><td>5344 … 9553</td><td>5</td></tr><tr><td>fixed</td><td>resident_delivery_samples</td><td>1584</td><td>1584 … 1584</td><td>5</td></tr><tr><td>fixed</td><td>resident_during_handoff_p50_us</td><td>4463</td><td>1945 … 4867</td><td>5</td></tr><tr><td>fixed</td><td>resident_during_handoff_p95_us</td><td>5341</td><td>5005 … 9591</td><td>5</td></tr><tr><td>fixed</td><td>resident_during_handoff_p99_us</td><td>5374</td><td>5067 … 9634</td><td>5</td></tr><tr><td>fixed</td><td>resident_during_handoff_samples</td><td>144</td><td>144 … 144</td><td>5</td></tr><tr><td>fixed</td><td>source_exit_ms</td><td>407.609</td><td>404.541 … 409.234</td><td>5</td></tr><tr><td>fixed</td><td>viewers</td><td>144</td><td>144 … 144</td><td>5</td></tr><tr><td>bounded</td><td>complete_viewers</td><td>144</td><td>144 … 144</td><td>5</td></tr><tr><td>bounded</td><td>connect_peak_qps</td><td>80</td><td>80 … 80</td><td>5</td></tr><tr><td>bounded</td><td>danmaku_delivery_queue_wait_seconds_count</td><td>24</td><td>24 … 24</td><td>5</td></tr><tr><td>bounded</td><td>danmaku_delivery_queue_wait_seconds_sum</td><td>0.00014533799999999996</td><td>0.00011216599999999997 … 0.00015945499999999997</td><td>5</td></tr><tr><td>bounded</td><td>danmaku_dropped_messages_total{reason=&#34;client_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>bounded</td><td>danmaku_dropped_messages_total{reason=&#34;shard_full&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>bounded</td><td>danmaku_fanout_frames_total{mode=&#34;batch&#34;}</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>bounded</td><td>danmaku_fanout_frames_total{mode=&#34;single&#34;}</td><td>3026</td><td>3020 … 3028</td><td>5</td></tr><tr><td>bounded</td><td>danmaku_kicked_slow_clients_total</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>bounded</td><td>drain_ms</td><td>1905.344</td><td>1903.243 … 1907.242</td><td>5</td></tr><tr><td>bounded</td><td>events</td><td>24</td><td>24 … 24</td><td>5</td></tr><tr><td>bounded</td><td>go_gc_duration_seconds_sum</td><td>0.0007021239999999999</td><td>0.000359458 … 0.002040291</td><td>5</td></tr><tr><td>bounded</td><td>go_goroutines</td><td>4</td><td>4 … 5</td><td>5</td></tr><tr><td>bounded</td><td>go_memstats_alloc_bytes_total</td><td>8033744</td><td>7727712 … 8955960</td><td>5</td></tr><tr><td>bounded</td><td>invited</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>bounded</td><td>last_handoff_ms</td><td>1811</td><td>1810 … 1812</td><td>5</td></tr><tr><td>bounded</td><td>migrating_delivery_p50_us</td><td>4423</td><td>4250 … 4526</td><td>5</td></tr><tr><td>bounded</td><td>migrating_delivery_p95_us</td><td>5506</td><td>5189 … 6180</td><td>5</td></tr><tr><td>bounded</td><td>migrating_delivery_p99_us</td><td>6484</td><td>5601 … 8155</td><td>5</td></tr><tr><td>bounded</td><td>migrating_delivery_samples</td><td>1584</td><td>1584 … 1584</td><td>5</td></tr><tr><td>bounded</td><td>moved</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>bounded</td><td>peak_attempts_per_sec</td><td>36</td><td>36 … 36</td><td>5</td></tr><tr><td>bounded</td><td>process_cpu_seconds_total</td><td>0.213808</td><td>0.195677 … 0.227207</td><td>5</td></tr><tr><td>bounded</td><td>process_resident_memory_bytes</td><td>11354112</td><td>10911744 … 12746752</td><td>5</td></tr><tr><td>bounded</td><td>recent_peak_qps</td><td>80</td><td>80 … 80</td><td>5</td></tr><tr><td>bounded</td><td>recovery_p50_ms</td><td>8</td><td>8 … 8</td><td>5</td></tr><tr><td>bounded</td><td>recovery_p95_ms</td><td>11</td><td>10 … 17</td><td>5</td></tr><tr><td>bounded</td><td>recovery_p99_ms</td><td>11</td><td>11 … 18</td><td>5</td></tr><tr><td>bounded</td><td>recovery_samples</td><td>72</td><td>72 … 72</td><td>5</td></tr><tr><td>bounded</td><td>resident_delivery_p50_us</td><td>4456</td><td>4213 … 4511</td><td>5</td></tr><tr><td>bounded</td><td>resident_delivery_p95_us</td><td>5346</td><td>5197 … 6128</td><td>5</td></tr><tr><td>bounded</td><td>resident_delivery_p99_ms</td><td>6</td><td>5 … 7</td><td>5</td></tr><tr><td>bounded</td><td>resident_delivery_p99_us</td><td>6128</td><td>5424 … 7362</td><td>5</td></tr><tr><td>bounded</td><td>resident_delivery_samples</td><td>1584</td><td>1584 … 1584</td><td>5</td></tr><tr><td>bounded</td><td>resident_during_handoff_p50_us</td><td>4539</td><td>3621 … 4637</td><td>5</td></tr><tr><td>bounded</td><td>resident_during_handoff_p95_us</td><td>5861</td><td>5206 … 7223</td><td>5</td></tr><tr><td>bounded</td><td>resident_during_handoff_p99_us</td><td>6225</td><td>5361 … 8840</td><td>5</td></tr><tr><td>bounded</td><td>resident_during_handoff_samples</td><td>576</td><td>576 … 576</td><td>5</td></tr><tr><td>bounded</td><td>source_exit_ms</td><td>1905.344</td><td>1903.243 … 1907.242</td><td>5</td></tr><tr><td>bounded</td><td>viewers</td><td>144</td><td>144 … 144</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>history_pagination page_1 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>offset_baseline</td><td>p50_us</td><td>518.583</td><td>487.791 … 554.333</td><td>5</td></tr><tr><td>offset_baseline</td><td>p95_us</td><td>576.625</td><td>532.5 … 1625.75</td><td>5</td></tr><tr><td>offset_baseline</td><td>p999_us</td><td>576.625</td><td>532.5 … 1625.75</td><td>5</td></tr><tr><td>offset_baseline</td><td>p99_us</td><td>576.625</td><td>532.5 … 1625.75</td><td>5</td></tr><tr><td>offset_baseline</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p50_us</td><td>514.333</td><td>474.584 … 522.292</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p95_us</td><td>570.834</td><td>511.917 … 1608.041</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p999_us</td><td>570.834</td><td>511.917 … 1608.041</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p99_us</td><td>570.834</td><td>511.917 … 1608.041</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>history_pagination page_200 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>offset_baseline</td><td>p50_us</td><td>9178.834</td><td>9076.083 … 9355.459</td><td>5</td></tr><tr><td>offset_baseline</td><td>p95_us</td><td>9706.541</td><td>9387 … 9818.375</td><td>5</td></tr><tr><td>offset_baseline</td><td>p999_us</td><td>9706.541</td><td>9387 … 9818.375</td><td>5</td></tr><tr><td>offset_baseline</td><td>p99_us</td><td>9706.541</td><td>9387 … 9818.375</td><td>5</td></tr><tr><td>offset_baseline</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p50_us</td><td>533.834</td><td>493.375 … 564.666</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p95_us</td><td>565.75</td><td>497.042 … 613.375</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p999_us</td><td>565.75</td><td>497.042 … 613.375</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p99_us</td><td>565.75</td><td>497.042 … 613.375</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>history_pagination page_1000 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>offset_baseline</td><td>p50_us</td><td>37609.5</td><td>37261.5 … 40815.708</td><td>5</td></tr><tr><td>offset_baseline</td><td>p95_us</td><td>40599.041</td><td>38220.666 … 46755.792</td><td>5</td></tr><tr><td>offset_baseline</td><td>p999_us</td><td>40599.041</td><td>38220.666 … 46755.792</td><td>5</td></tr><tr><td>offset_baseline</td><td>p99_us</td><td>40599.041</td><td>38220.666 … 46755.792</td><td>5</td></tr><tr><td>offset_baseline</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p50_us</td><td>523.292</td><td>505.5 … 560.042</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p95_us</td><td>676.625</td><td>617.333 … 719.708</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p999_us</td><td>676.625</td><td>617.333 … 719.708</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p99_us</td><td>676.625</td><td>617.333 … 719.708</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>history_pagination page_2000 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>offset_baseline</td><td>p50_us</td><td>90843.583</td><td>89905.083 … 91069.625</td><td>5</td></tr><tr><td>offset_baseline</td><td>p95_us</td><td>92626.375</td><td>90400.583 … 103788.208</td><td>5</td></tr><tr><td>offset_baseline</td><td>p999_us</td><td>92626.375</td><td>90400.583 … 103788.208</td><td>5</td></tr><tr><td>offset_baseline</td><td>p99_us</td><td>92626.375</td><td>90400.583 … 103788.208</td><td>5</td></tr><tr><td>offset_baseline</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p50_us</td><td>581.542</td><td>562.041 … 584.666</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p95_us</td><td>685.291</td><td>664.042 … 748.375</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p999_us</td><td>685.291</td><td>664.042 … 748.375</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p99_us</td><td>685.291</td><td>664.042 … 748.375</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>history_pagination page_3600 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>offset_baseline</td><td>p50_us</td><td>162105.792</td><td>160594.042 … 162483.666</td><td>5</td></tr><tr><td>offset_baseline</td><td>p95_us</td><td>164869.75</td><td>163672.583 … 171924.167</td><td>5</td></tr><tr><td>offset_baseline</td><td>p999_us</td><td>164869.75</td><td>163672.583 … 171924.167</td><td>5</td></tr><tr><td>offset_baseline</td><td>p99_us</td><td>164869.75</td><td>163672.583 … 171924.167</td><td>5</td></tr><tr><td>offset_baseline</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p50_us</td><td>552.792</td><td>526.416 … 621.667</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p95_us</td><td>689.042</td><td>625.083 … 1152.042</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p999_us</td><td>689.042</td><td>625.083 … 1152.042</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>p99_us</td><td>689.042</td><td>625.083 … 1152.042</td><td>5</td></tr><tr><td>cursor_before_id_prod</td><td>samples</td><td>6</td><td>6 … 6</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>pg_archive_write batch_128 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>row_by_row_tx</td><td>alloc_bytes_per_batch</td><td>72319.04</td><td>72296 … 72319.04</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>allocs_per_batch</td><td>1676.01</td><td>1676 … 1676.01</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>batch_p50_us</td><td>28437.167</td><td>28228.75 … 28530.459</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>batch_p95_us</td><td>32576.208</td><td>30611.166 … 33801.333</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>batch_p999_us</td><td>43757.042</td><td>36849.25 … 50787.875</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>batch_p99_us</td><td>35871.75</td><td>35461.167 … 39687.125</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>batch_samples</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>duplicate_rows</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>row_by_row_tx</td><td>rows_per_second</td><td>4489.995356916848</td><td>4433.35432393836 … 4539.808737098907</td><td>5</td></tr><tr><td>multivalue_insert</td><td>alloc_bytes_per_batch</td><td>159343.92</td><td>159323.92 … 159361.12</td><td>5</td></tr><tr><td>multivalue_insert</td><td>allocs_per_batch</td><td>1328.28</td><td>1328.21 … 1328.35</td><td>5</td></tr><tr><td>multivalue_insert</td><td>batch_p50_us</td><td>1524.25</td><td>1465.708 … 1550.25</td><td>5</td></tr><tr><td>multivalue_insert</td><td>batch_p95_us</td><td>2076.084</td><td>1851.583 … 2446.792</td><td>5</td></tr><tr><td>multivalue_insert</td><td>batch_p999_us</td><td>2691.666</td><td>2605.625 … 6033.542</td><td>5</td></tr><tr><td>multivalue_insert</td><td>batch_p99_us</td><td>2527.458</td><td>2465.125 … 5896.625</td><td>5</td></tr><tr><td>multivalue_insert</td><td>batch_samples</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>multivalue_insert</td><td>duplicate_rows</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>multivalue_insert</td><td>rows_per_second</td><td>80253.73975373701</td><td>76539.11642167672 … 82586.70595987287</td><td>5</td></tr><tr><td>unnest_prod</td><td>alloc_bytes_per_batch</td><td>73960.8</td><td>73937.6 … 73961.12</td><td>5</td></tr><tr><td>unnest_prod</td><td>allocs_per_batch</td><td>809.94</td><td>809.93 … 809.95</td><td>5</td></tr><tr><td>unnest_prod</td><td>batch_p50_us</td><td>1541.916</td><td>1536.25 … 1610.5</td><td>5</td></tr><tr><td>unnest_prod</td><td>batch_p95_us</td><td>2007.667</td><td>1844 … 2595.458</td><td>5</td></tr><tr><td>unnest_prod</td><td>batch_p999_us</td><td>2940.958</td><td>2599.084 … 4508.709</td><td>5</td></tr><tr><td>unnest_prod</td><td>batch_p99_us</td><td>2576.625</td><td>2554.084 … 3901.375</td><td>5</td></tr><tr><td>unnest_prod</td><td>batch_samples</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>unnest_prod</td><td>duplicate_rows</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>unnest_prod</td><td>rows_per_second</td><td>80562.93349781599</td><td>72753.10834813499 … 81638.98789263834</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>redis_lua_atomicity 0s · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>multi_cmd_baseline</td><td>extra_broadcasts</td><td>35</td><td>35 … 35</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p50_us</td><td>3414.625</td><td>2683 … 3589.459</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p95_us</td><td>3743.5</td><td>3105.834 … 3976.333</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p999_us</td><td>3834.083</td><td>3329.833 … 6998.833</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p99_us</td><td>3786.833</td><td>3270.666 … 4634.541</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>qps</td><td>295.03496717551593</td><td>280.0920711934217 … 364.4658003261138</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>race_duplicate_rate</td><td>0.21875</td><td>0.21875 … 0.21875</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>samples</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>stream_writes</td><td>40</td><td>40 … 40</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>extra_broadcasts</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p50_us</td><td>386.417</td><td>363.833 … 432.833</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p95_us</td><td>413.417</td><td>404.791 … 474.083</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p999_us</td><td>451.417</td><td>429 … 676.583</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p99_us</td><td>431.583</td><td>411.209 … 494.125</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>qps</td><td>2586.0954492142187</td><td>2322.594916383215 … 2778.8230011738583</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>race_duplicate_rate</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>samples</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>stream_writes</td><td>5</td><td>5 … 5</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>redis_lua_atomicity 2ms · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>multi_cmd_baseline</td><td>extra_broadcasts</td><td>35</td><td>35 … 35</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p50_us</td><td>34824</td><td>32998.708 … 35438.333</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p95_us</td><td>38237.666</td><td>36997.708 … 39564.792</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p999_us</td><td>42523.25</td><td>38199.917 … 49841.75</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>p99_us</td><td>40920.5</td><td>37707.875 … 43755</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>qps</td><td>29.47157611675259</td><td>28.420754924171117 … 31.016260972680797</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>race_duplicate_rate</td><td>0.21875</td><td>0.21875 … 0.21875</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>samples</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>multi_cmd_baseline</td><td>stream_writes</td><td>40</td><td>40 … 40</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>extra_broadcasts</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p50_us</td><td>3643.625</td><td>3535.958 … 4147.209</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p95_us</td><td>4769.083</td><td>4380.458 … 5109.625</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p999_us</td><td>6221.458</td><td>5399.333 … 11693.25</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>p99_us</td><td>5156</td><td>4783.375 … 8982.75</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>qps</td><td>264.74762900495386</td><td>232.05575716920714 … 273.0089059845974</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>race_duplicate_rate</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>samples</td><td>100</td><td>100 … 100</td><td>5</td></tr><tr><td>lua_evalsha_prod</td><td>stream_writes</td><td>5</td><td>5 … 5</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>sensitive_filter_scaling words_100 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>naive_contains</td><td>hit_us</td><td>0.95916</td><td>0.84541 … 1.08875</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_us</td><td>0.70041</td><td>0.64125 … 0.81916</td><td>5</td></tr><tr><td>merged_regexp</td><td>hit_us</td><td>96.38708000000001</td><td>95.7625 … 102.4375</td><td>5</td></tr><tr><td>merged_regexp</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>merged_regexp</td><td>miss_us</td><td>96.38958000000001</td><td>95.81458 … 108.42165999999999</td><td>5</td></tr><tr><td>ac_prod</td><td>hit_us</td><td>1.41333</td><td>1.33209 … 1.5379099999999999</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_us</td><td>1.35125</td><td>1.28458 … 1.45333</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>sensitive_filter_scaling words_1000 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>naive_contains</td><td>hit_us</td><td>9.11083</td><td>8.89291 … 9.32958</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_us</td><td>6.5804100000000005</td><td>6.34792 … 6.93208</td><td>5</td></tr><tr><td>merged_regexp</td><td>hit_us</td><td>1518.8816699999998</td><td>1467.3204199999998 … 1550.9966699999998</td><td>5</td></tr><tr><td>merged_regexp</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>merged_regexp</td><td>miss_us</td><td>1475.76959</td><td>1454.82542 … 1627.75</td><td>5</td></tr><tr><td>ac_prod</td><td>hit_us</td><td>1.42541</td><td>1.4125 … 1.47042</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_us</td><td>1.36625</td><td>1.30083 … 1.41875</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>sensitive_filter_scaling words_5000 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>naive_contains</td><td>hit_us</td><td>46.90459</td><td>45.715 … 46.98708</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_us</td><td>34.42792</td><td>33.77708 … 34.79125</td><td>5</td></tr><tr><td>ac_prod</td><td>hit_us</td><td>1.47083</td><td>1.39459 … 1.5616700000000001</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_us</td><td>1.41792</td><td>1.28917 … 1.46584</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>sensitive_filter_scaling words_20000 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>naive_contains</td><td>hit_us</td><td>184.46666000000002</td><td>182.27375 … 186.51292</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>naive_contains</td><td>miss_us</td><td>137.23083</td><td>133.95125 … 138.78041</td><td>5</td></tr><tr><td>ac_prod</td><td>hit_us</td><td>1.3975</td><td>1.34208 … 1.59333</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_allocs_per_op</td><td>0</td><td>0 … 0</td><td>5</td></tr><tr><td>ac_prod</td><td>miss_us</td><td>1.31166</td><td>1.26333 … 1.59209</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>sensitive_filter_scaling reload_5000 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>rwmutex_rebuild_baseline</td><td>reload_p50_us</td><td>2</td><td>2 … 2.041</td><td>5</td></tr><tr><td>rwmutex_rebuild_baseline</td><td>reload_p95_us</td><td>13829.292</td><td>11456.375 … 14249.625</td><td>5</td></tr><tr><td>rwmutex_rebuild_baseline</td><td>reload_p999_us</td><td>33240.541</td><td>25598.042 … 44595.959</td><td>5</td></tr><tr><td>rwmutex_rebuild_baseline</td><td>reload_p99_us</td><td>23408.709</td><td>18758.5 … 30666.041</td><td>5</td></tr><tr><td>rwmutex_rebuild_baseline</td><td>reload_samples</td><td>160</td><td>160 … 160</td><td>5</td></tr><tr><td>atomic_pointer_prod</td><td>reload_p50_us</td><td>1.625</td><td>1.541 … 1.917</td><td>5</td></tr><tr><td>atomic_pointer_prod</td><td>reload_p95_us</td><td>4.417</td><td>3.459 … 4.5</td><td>5</td></tr><tr><td>atomic_pointer_prod</td><td>reload_p999_us</td><td>82.166</td><td>80.583 … 88.334</td><td>5</td></tr><tr><td>atomic_pointer_prod</td><td>reload_p99_us</td><td>9.083</td><td>6.75 … 9.958</td><td>5</td></tr><tr><td>atomic_pointer_prod</td><td>reload_samples</td><td>322356</td><td>281622 … 360931</td><td>5</td></tr></tbody>
+</table></article>
+
+<h2>live_source_singleflight burst_120 · PASS</h2>
+<article><table>
+  <thead><tr><th>Arm</th><th>Metric</th><th>Median</th><th>95% CI</th><th>Runs</th></tr></thead>
+  <tbody><tr><td>direct_no_coalesce</td><td>cold_p50_us</td><td>86699.333</td><td>84901.333 … 89937.625</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>cold_p95_us</td><td>89352.083</td><td>86294.5 … 92441.042</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>cold_p999_us</td><td>89501.25</td><td>86779.834 … 92522.167</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>cold_p99_us</td><td>89470.25</td><td>86352.208 … 92488</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>cold_samples</td><td>120</td><td>120 … 120</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>cold_upstream_calls</td><td>120</td><td>120 … 120</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>warm_p50_us</td><td>84151.75</td><td>83010.708 … 86693.792</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>warm_p95_us</td><td>85954.708</td><td>85460.208 … 87828.583</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>warm_p999_us</td><td>86545.959</td><td>86202.084 … 88546.375</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>warm_p99_us</td><td>86315.417</td><td>86107.333 … 88283.083</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>warm_samples</td><td>120</td><td>120 … 120</td><td>5</td></tr><tr><td>direct_no_coalesce</td><td>warm_upstream_calls</td><td>120</td><td>120 … 120</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>cold_p50_us</td><td>82283.417</td><td>81215.125 … 83029.125</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>cold_p95_us</td><td>82447.583</td><td>81370.5 … 83131.208</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>cold_p999_us</td><td>82488</td><td>81388.542 … 83185.875</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>cold_p99_us</td><td>82461.75</td><td>81381.292 … 83160.25</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>cold_samples</td><td>120</td><td>120 … 120</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>cold_upstream_calls</td><td>1</td><td>1 … 1</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>warm_p50_us</td><td>0.5</td><td>0.333 … 0.75</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>warm_p95_us</td><td>3.083</td><td>1.708 … 16.542</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>warm_p999_us</td><td>7.542</td><td>5.375 … 27.167</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>warm_p99_us</td><td>7</td><td>4.583 … 26.166</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>warm_samples</td><td>120</td><td>120 … 120</td><td>5</td></tr><tr><td>prod_singleflight_cache</td><td>warm_upstream_calls</td><td>0</td><td>0 … 0</td><td>5</td></tr></tbody>
+</table></article>
+
+  
+  <footer>darwin/arm64 · go1.27.4 · CPUs 10 · profile full · repeats 5 (&#43; warmup) · 2026-11-23T11:24:52.059372Z · git_sha c81541ed51f170e9e45d59c9f016beffc985fcdc · dirty true</footer>
+</body>
+</html>
+

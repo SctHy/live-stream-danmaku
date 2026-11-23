@@ -17,19 +17,23 @@ import (
 )
 
 type lab struct {
-	http                    *http.Client
-	dialer                  websocket.Dialer
-	a, b, path              string
-	cookie                  http.Header
-	count                   int
-	start                   atomic.Int64
-	lastMoveMS              int64
-	wg                      sync.WaitGroup
-	moved, invited, ready   atomic.Int64
-	mu                      sync.Mutex
-	errors                  []string
-	attempts                map[int]int
-	stableLatency, recovery []int64
+	expectedMoves                          int64
+	during                                 []int64
+	http                                   *http.Client
+	dialer                                 websocket.Dialer
+	a, b, path                             string
+	cookie                                 http.Header
+	count                                  int
+	start                                  atomic.Int64
+	lastMoveMS                             int64
+	wg                                     sync.WaitGroup
+	moved, invited, ready                  atomic.Int64
+	mu                                     sync.Mutex
+	errors                                 []string
+	attempts                               map[int]int
+	stableLatency, movingLatency, recovery []int64
+	connects, recents                      []int64
+	sent                                   []atomic.Int64
 }
 
 func (l *lab) connect(addr string) (*websocket.Conn, error) {
@@ -52,20 +56,23 @@ type viewer struct {
 	next   int
 }
 
-func (v *viewer) apply(p protocol.WsPacket) (time.Duration, error) {
+func (v *viewer) apply(p protocol.WsPacket) error {
+	if p.Position == "" || p.Position == v.cursor {
+		return fmt.Errorf("invalid cursor at %d", v.next)
+	}
 	if p.Previous != v.cursor && !(v.cursor == "" && p.Previous == "0-0") {
-		return 0, fmt.Errorf("cursor gap at %d", v.next)
+		return fmt.Errorf("cursor gap at %d", v.next)
 	}
 	var d protocol.DanmakuMessage
 	if err := json.Unmarshal(p.Data, &d); err != nil {
-		return 0, err
+		return err
 	}
 	if d.Content != strconv.Itoa(v.next) {
-		return 0, fmt.Errorf("want %d got %s", v.next, d.Content)
+		return fmt.Errorf("want %d got %s", v.next, d.Content)
 	}
 	v.next++
 	v.cursor = p.Position
-	return time.Since(d.SendTime), nil
+	return nil
 }
 func (l *lab) watch(c *websocket.Conn, onA bool) error {
 	defer func() { c.Close() }()
@@ -94,13 +101,20 @@ func (l *lab) watch(c *websocket.Conn, onA bool) error {
 					delete(overlap, p.Position)
 					continue
 				}
-				latency, e := v.apply(p)
-				if e != nil {
+				if e := v.apply(p); e != nil {
 					return e
 				}
-				if !onA && v.next > 2 {
+				if v.next > 2 {
+					latency := time.Since(time.Unix(0, l.sent[v.next-1].Load()))
 					l.mu.Lock()
-					l.stableLatency = append(l.stableLatency, latency.Milliseconds())
+					if onA {
+						l.movingLatency = append(l.movingLatency, latency.Microseconds())
+					} else {
+						if l.moved.Load() < l.expectedMoves {
+							l.during = append(l.during, latency.Microseconds())
+						}
+						l.stableLatency = append(l.stableLatency, latency.Microseconds())
+					}
 					l.mu.Unlock()
 				}
 			}
@@ -118,10 +132,13 @@ func (l *lab) watch(c *websocket.Conn, onA bool) error {
 		}
 		overlap = map[string]bool{}
 		for _, p := range events {
-			if _, e = v.apply(p); e != nil {
+			if e = v.apply(p); e != nil {
 				replacement.Close()
 				return e
 			}
+			l.mu.Lock()
+			l.movingLatency = append(l.movingLatency, time.Since(time.Unix(0, l.sent[v.next-1].Load())).Microseconds())
+			l.mu.Unlock()
 			overlap[p.Position] = true
 		}
 		c.Close()
@@ -165,10 +182,16 @@ func (l *lab) replace(cursor string, backoff bool) (*websocket.Conn, []protocol.
 		if err != nil || session.UserID == 0 {
 			continue
 		}
+		l.mu.Lock()
+		l.connects = append(l.connects, time.Now().UnixNano())
+		l.mu.Unlock()
 		c, err := l.connect(l.b)
 		if err != nil {
 			continue
 		}
+		l.mu.Lock()
+		l.recents = append(l.recents, time.Now().UnixNano())
+		l.mu.Unlock()
 		resp, err := l.http.Get("http://" + l.b + l.path + "/recent?after=" + cursor)
 		if err != nil {
 			c.Close()
