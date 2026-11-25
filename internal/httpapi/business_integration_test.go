@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -76,7 +77,10 @@ func TestBusinessRoutesIntegration(t *testing.T) {
 	}
 	slug := rand.Text()[:16]
 	room := slug + "/live"
-	uid := ^uint64(0)
+	var userBytes [8]byte
+	rand.Read(userBytes[:])
+	// Exercise unsigned IDs above MaxInt64 with a fresh Redis profile per run.
+	uid := binary.BigEndian.Uint64(userBytes[:]) | uint64(1)<<63
 	_, e = db.Exec(ctx, "INSERT INTO users(id,username,nickname,password_hash) VALUES($1,'owner','owner',''),(2,'mod','mod','')", uid)
 	if e != nil {
 		t.Fatal(e)
@@ -118,7 +122,7 @@ func TestBusinessRoutesIntegration(t *testing.T) {
 		return o
 	}
 	base := "/api/rooms/" + room
-	expect("POST", "/api/rooms", fmt.Sprintf(`{"slug":%q,"title":"old"}`, slug), token, 201)
+	expect("POST", "/api/rooms", fmt.Sprintf(`{"slug":%q,"title":"old","category":"coding","tags":[%q," Go ","Go"," "]} `, slug, slug), token, 201)
 	var wg sync.WaitGroup
 	var claims, orders, spent atomic.Int32
 	for range 12 {
@@ -246,6 +250,20 @@ func TestBusinessRoutesIntegration(t *testing.T) {
 	if counts.details.Load() != 1 || counts.index.Load() != 1 {
 		t.Fatalf("concurrent index/detail queries = %d/%d", counts.index.Load(), counts.details.Load())
 	}
+	meta := expect("GET", "/api/rooms/"+slug, "", "", 200)
+	if meta["category"] != "coding" || len(meta["tags"].([]any)) != 2 {
+		t.Fatal(meta)
+	}
+	pref := expect("GET", "/api/me/preferences", "", token, 200)
+	if pref["tags"].(map[string]any)[slug] != float64(25) || pref["recent_rooms"].(map[string]any)[slug] == nil {
+		t.Fatal(pref)
+	}
+	expect("PATCH", "/api/rooms/"+slug, `{"tags":["1","2","3","4","5","6"]}`, token, 400)
+	expect("GET", "/api/rooms?sort=recommend&strategy=unknown", "", "", 400)
+	strategies := expect("GET", "/api/plaza/strategies", "", "", 200)
+	if len(strategies["categories"].([]any)) != 5 || len(strategies["strategies"].([]any)) != 5 {
+		t.Fatal(strategies)
+	}
 	if rooms()["title"] != "old" {
 		t.Fatal("missing metadata")
 	}
@@ -253,12 +271,27 @@ func TestBusinessRoutesIntegration(t *testing.T) {
 	NewChatHandler(history, nil, redis, false).Routes(peer)
 	primary := mux
 	mux = peer
-	expect("PATCH", "/api/rooms/"+slug, `{"title":"new"}`, token, 200)
+	expect("PATCH", "/api/rooms/"+slug, `{"title":"new","category":"music","tags":["音樂"]}`, token, 200)
 	mux = primary
 	if rooms()["title"] != "new" {
 		t.Fatal("stale metadata")
 	}
+	candidate := rand.Text()[:16]
+	expect("POST", "/api/rooms", fmt.Sprintf(`{"slug":%q,"title":"candidate","category":"coding","tags":[%q]}`, candidate, slug), token, 201)
+	recommended := expect("GET", "/api/rooms?sort=recommend&strategy=personalized_v1", "", token, 200)
+	top := recommended["rooms"].([]any)[0].(map[string]any)
+	if top["slug"] != candidate || top["recommend_reason"] == "" {
+		t.Fatal(recommended)
+	}
+	filtered := expect("GET", "/api/rooms?category=music&sort=recommend&strategy=explore_v1", "", token, 200)
+	if filtered["strategy"] != "explore_v1" || len(filtered["rooms"].([]any)) != 1 || filtered["rooms"].([]any)[0].(map[string]any)["slug"] != slug {
+		t.Fatal(filtered)
+	}
 	history.pool = nil
+	offline := expect("GET", "/api/rooms?category=music&sort=recommend", "", token, 200)
+	if offline["degraded"] != true || len(offline["rooms"].([]any)) != 1 {
+		t.Fatal(offline)
+	}
 	if o := rooms(); o["degraded"] != true || o["online"] != float64(3) {
 		t.Fatal(o)
 	}

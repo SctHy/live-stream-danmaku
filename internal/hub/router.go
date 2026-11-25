@@ -128,6 +128,9 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 	}
 	if status == "new" {
 		m.producer.Publish(c.RoomID, wire)
+		if c.Interest != nil {
+			c.Interest(2)
+		}
 		status = "accepted"
 	}
 	m.receipt(c, input.ClientMsgID, status, eventID)
@@ -146,6 +149,9 @@ func (m *Hub) handleLike(c *Client, data []byte) {
 	m.likesMu.Lock()
 	m.localLikes[c.RoomID] += like.Count
 	m.likesMu.Unlock()
+	if c.Interest != nil {
+		c.Interest(1)
+	}
 }
 
 func (m *Hub) FilterMessage(content string) (string, bool) {

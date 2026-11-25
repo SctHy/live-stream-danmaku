@@ -23,6 +23,7 @@ import (
 	"github.com/scthy/maku/internal/hub"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
+	"github.com/scthy/maku/internal/recommend"
 )
 
 //go:embed all:web
@@ -55,19 +56,23 @@ type sessionStore interface {
 	RefreshLogin(context.Context, string, pubsub.Login) error
 }
 type ChatHandler struct {
-	liveResolver *liveResolver
-	history      HistoryStore
-	manager      *hub.Hub
-	sessions     sessionStore
-	allowDev     bool
-	plaza        plazaCache
-	plugins      commerce.Plugins
+	recommendations *recommend.Registry
+	profileSlots    chan struct{}
+	liveResolver    *liveResolver
+	history         HistoryStore
+	manager         *hub.Hub
+	sessions        sessionStore
+	allowDev        bool
+	plaza           plazaCache
+	plugins         commerce.Plugins
 }
 
 func NewChatHandler(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool) *ChatHandler {
 	plugins := commerce.DefaultPlugins()
-	return &ChatHandler{plugins: plugins, liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
+	return &ChatHandler{recommendations: recommend.Default(), profileSlots: make(chan struct{}, 32), plugins: plugins, liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
 }
+
+func (h *ChatHandler) SetRecommendations(r *recommend.Registry) { h.recommendations = r }
 
 // SetCommerce installs the registries before serving requests.
 func (h *ChatHandler) SetCommerce(p commerce.Plugins) { h.plugins = p }
@@ -241,6 +246,8 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 		return
 	}
 
+	client.Interest = func(weight int) { h.recordInterest(r.Context(), uid, r.PathValue("room"), weight) }
+	client.Interest(1)
 	go client.WritePump()
 	client.ReadPump(h.manager)
 }

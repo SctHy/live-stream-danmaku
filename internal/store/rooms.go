@@ -10,6 +10,8 @@ import (
 )
 
 type Room struct {
+	Category      string    `json:"category"`
+	Tags          []string  `json:"tags"`
 	Slug          string    `json:"slug"`
 	OwnerID       uint64    `json:"owner_id"`
 	Title         string    `json:"title"`
@@ -23,11 +25,11 @@ type Room struct {
 
 func LoadRoom(ctx context.Context, tx pgx.Tx, slug string, lock bool) (Room, error) {
 	var v Room
-	query := `SELECT slug,owner_id,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at FROM rooms WHERE slug=$1`
+	query := `SELECT slug,owner_id,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at,category,tags FROM rooms WHERE slug=$1`
 	if lock {
 		query += " FOR UPDATE"
 	}
-	err := tx.QueryRow(ctx, query, slug).Scan(&v.Slug, &v.OwnerID, &v.Title, &v.Description, &v.ActiveSession, &v.Bilibili, &v.Notice, &v.Status, &v.Slow, &v.MuteAll, &v.CreatedAt, &v.UpdatedAt)
+	err := tx.QueryRow(ctx, query, slug).Scan(&v.Slug, &v.OwnerID, &v.Title, &v.Description, &v.ActiveSession, &v.Bilibili, &v.Notice, &v.Status, &v.Slow, &v.MuteAll, &v.CreatedAt, &v.UpdatedAt, &v.Category, &v.Tags)
 	return v, err
 }
 func (v Room) Role(ctx context.Context, tx pgx.Tx, uid uint64) (string, error) {
@@ -45,7 +47,7 @@ func (v Room) Role(ctx context.Context, tx pgx.Tx, uid uint64) (string, error) {
 	return "viewer", err
 }
 func (v *Room) Save(ctx context.Context, tx pgx.Tx) error {
-	return tx.QueryRow(ctx, `UPDATE rooms SET title=$2,description=$3,active_session=$4,bilibili_room_id=$5,notice=$6,status=$7,slow_mode_seconds=$8,mute_all=$9,updated_at=now() WHERE slug=$1 RETURNING updated_at`, v.Slug, v.Title, v.Description, v.ActiveSession, v.Bilibili, v.Notice, v.Status, v.Slow, v.MuteAll).Scan(&v.UpdatedAt)
+	return tx.QueryRow(ctx, `UPDATE rooms SET title=$2,description=$3,active_session=$4,bilibili_room_id=$5,notice=$6,status=$7,slow_mode_seconds=$8,mute_all=$9,category=$10,tags=$11,updated_at=now() WHERE slug=$1 RETURNING updated_at`, v.Slug, v.Title, v.Description, v.ActiveSession, v.Bilibili, v.Notice, v.Status, v.Slow, v.MuteAll, v.Category, v.Tags).Scan(&v.UpdatedAt)
 }
 
 type Audit struct {

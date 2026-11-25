@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -158,6 +159,8 @@ func (h *ChatHandler) replays(w http.ResponseWriter, r *http.Request) {
 			dbError(w, err)
 			return
 		}
+		request := r.Clone(ctx)
+		h.scheduleInterest(ctx, room, 1, func(work context.Context) uint64 { uid, _ := h.viewer(request.WithContext(work)); return uid })
 		v.Chunk = 60000
 		writeJSON(w, v)
 		return
@@ -320,6 +323,7 @@ func (h *ChatHandler) timeline(w http.ResponseWriter, r *http.Request) {
 			dbError(w, err)
 			return
 		}
+		h.recordInterest(ctx, login.UserID, slug, 2)
 		writeJSON(w, v)
 		return
 	}

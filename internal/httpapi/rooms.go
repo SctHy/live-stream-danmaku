@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/scthy/maku/internal/protocol"
-
+	"github.com/scthy/maku/internal/recommend"
 	"github.com/scthy/maku/internal/store"
 )
 
@@ -59,7 +59,7 @@ func (h *ChatHandler) loadAccess(r *http.Request, legacy bool) (roomAccess, erro
 	name := r.PathValue("room")
 	a.room, err = store.LoadRoom(ctx, tx, name, r.Method != "GET")
 	if errors.Is(err, pgx.ErrNoRows) {
-		a.room = store.Room{Slug: name, Title: name, ActiveSession: "live", RoomControls: protocol.RoomControls{Status: "live"}}
+		a.room = store.Room{Slug: name, Title: name, Category: "chat", Tags: []string{}, ActiveSession: "live", RoomControls: protocol.RoomControls{Status: "live"}}
 		err = nil
 	}
 	if err == nil {
@@ -77,11 +77,28 @@ func (h *ChatHandler) loadAccess(r *http.Request, legacy bool) (roomAccess, erro
 
 var numericRoom = regexp.MustCompile(`^[0-9]{1,20}$`)
 
+func normalizeTags(tags []string) ([]string, bool) {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		if !validText(tag, 1, 16) || len(out) == 5 {
+			return nil, false
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	return out, true
+}
 func validRoom(v store.Room) bool {
-	return slug.MatchString(v.Slug) && validText(v.Title, 1, 100) && validText(v.Description, 0, 1000) && validText(v.Notice, 0, 1000) && slug.MatchString(v.ActiveSession) && (v.Bilibili == "" || numericRoom.MatchString(v.Bilibili)) && (v.Status == "live" || v.Status == "offline") && v.Slow >= 0 && v.Slow <= 300
+	return recommend.CategoryName(v.Category) != "" && slug.MatchString(v.Slug) && validText(v.Title, 1, 100) && validText(v.Description, 0, 1000) && validText(v.Notice, 0, 1000) && slug.MatchString(v.ActiveSession) && (v.Bilibili == "" || numericRoom.MatchString(v.Bilibili)) && (v.Status == "live" || v.Status == "offline") && v.Slow >= 0 && v.Slow <= 300
 }
 func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	generation := h.plaza.epoch()
 	if r.Method == "POST" {
 		login, ok := h.requireLogin(w, r)
 		if !ok {
@@ -89,13 +106,20 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 		}
 		var in struct {
 			Slug, Title, Description string
+			Category                 *string
+			Tags                     []string
 			Bilibili                 string `json:"bilibili_room_id"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
 		v := store.Room{Slug: in.Slug, Title: in.Title, Description: in.Description, Bilibili: in.Bilibili, OwnerID: login.UserID, ActiveSession: "live", RoomControls: protocol.RoomControls{Status: "live"}}
-		if !validRoom(v) {
+		v.Category = "chat"
+		if in.Category != nil {
+			v.Category = *in.Category
+		}
+		v.Tags, ok = normalizeTags(in.Tags)
+		if !ok || !validRoom(v) {
 			w.WriteHeader(400)
 			return
 		}
@@ -105,7 +129,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-			err := tx.QueryRow(ctx, "INSERT INTO rooms(slug,owner_id,title,description,bilibili_room_id) VALUES($1,$2,$3,$4,$5) RETURNING created_at,updated_at", v.Slug, v.OwnerID, v.Title, v.Description, v.Bilibili).Scan(&v.CreatedAt, &v.UpdatedAt)
+			err := tx.QueryRow(ctx, "INSERT INTO rooms(slug,owner_id,title,description,bilibili_room_id,category,tags) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING created_at,updated_at", v.Slug, v.OwnerID, v.Title, v.Description, v.Bilibili, v.Category, v.Tags).Scan(&v.CreatedAt, &v.UpdatedAt)
 			if err != nil {
 				return err
 			}
@@ -113,6 +137,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 		})
 		if err == nil {
 			h.invalidateRoom(ctx, v.Slug)
+			h.plaza.remember(generation+1, v)
 			err = h.flush(ctx, db, v.Slug)
 		}
 		if err != nil {
@@ -131,6 +156,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 	defer a.tx.Rollback(ctx)
 	v := a.room
 	if r.Method == "GET" {
+		h.plaza.remember(generation, v)
 		writeJSON(w, roomView{v, a.role})
 		return
 	}
@@ -142,7 +168,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &fields) {
 		return
 	}
-	dest := map[string]any{"title": &v.Title, "description": &v.Description, "bilibili_room_id": &v.Bilibili, "active_session": &v.ActiveSession, "slow_mode_seconds": &v.Slow, "mute_all": &v.MuteAll, "status": &v.Status, "notice": &v.Notice}
+	dest := map[string]any{"category": &v.Category, "tags": &v.Tags, "title": &v.Title, "description": &v.Description, "bilibili_room_id": &v.Bilibili, "active_session": &v.ActiveSession, "slow_mode_seconds": &v.Slow, "mute_all": &v.MuteAll, "status": &v.Status, "notice": &v.Notice}
 	for k, raw := range fields {
 		p, ok := dest[k]
 		if !ok || string(raw) == "null" || json.Unmarshal(raw, p) != nil {
@@ -150,7 +176,8 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if len(fields) == 0 || !validRoom(v) {
+	v.Tags, ok = normalizeTags(v.Tags)
+	if !ok || len(fields) == 0 || !validRoom(v) {
 		w.WriteHeader(400)
 		return
 	}
@@ -170,6 +197,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.invalidateRoom(ctx, v.Slug)
+	h.plaza.remember(generation+1, v)
 	writeJSON(w, roomView{v, "owner"})
 }
 

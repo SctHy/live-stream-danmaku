@@ -12,14 +12,19 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/scthy/maku/internal/pubsub"
+	"github.com/scthy/maku/internal/recommend"
 	"github.com/scthy/maku/internal/store"
 )
 
 type rank struct {
-	Slug    string
-	Status  string
-	Created time.Time
+	Category string
+	Tags     []string
+	Started  time.Time
+	Slug     string
+	Status   string
+	Created  time.Time
 	pubsub.Activity
 }
 type roomIndex struct {
@@ -144,13 +149,22 @@ func (h *ChatHandler) rankings(ctx context.Context, db *pgxpool.Pool, order, sta
 			}
 			query := `SELECT slug,status,created_at FROM rooms WHERE slug=ANY($1)
  UNION (SELECT slug,status,created_at FROM rooms WHERE $2='all' OR status='live' ORDER BY ` + baselineOrder + ` LIMIT 50)`
+			args := []any{active, status}
+			if order == "recommend" {
+				query = `SELECT slug,status,created_at,category,tags,COALESCE((SELECT started_at FROM room_replays WHERE room_slug=rooms.slug AND status='live' ORDER BY id DESC LIMIT 1),created_at) FROM rooms`
+				args = nil
+			}
 			lookup, cancel := context.WithTimeout(ctx, time.Second)
 			defer cancel()
-			rows, e := db.Query(lookup, query, active, status)
+			rows, e := db.Query(lookup, query, args...)
 			if e == nil {
 				var rooms []rank
 				rooms, e = pgx.CollectRows(rows, func(row pgx.CollectableRow) (rank, error) {
 					var v rank
+					if order == "recommend" {
+						err := row.Scan(&v.Slug, &v.Status, &v.Created, &v.Category, &v.Tags, &v.Started)
+						return v, err
+					}
 					err := row.Scan(&v.Slug, &v.Status, &v.Created)
 					return v, err
 				})
@@ -187,7 +201,9 @@ func (h *ChatHandler) rankings(ctx context.Context, db *pgxpool.Pool, order, sta
 			}
 			return a.Slug < b.Slug
 		})
-		idx.Ranks = idx.Ranks[:min(len(idx.Ranks), 50)]
+		if order != "recommend" {
+			idx.Ranks = idx.Ranks[:min(len(idx.Ranks), 50)]
+		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		if c.generation == generation {
@@ -200,7 +216,7 @@ func (h *ChatHandler) rankings(ctx context.Context, db *pgxpool.Pool, order, sta
 	})
 }
 func roomDetails(ctx context.Context, db *pgxpool.Pool, keys []string) (map[string]store.Room, error) {
-	rows, err := db.Query(ctx, `SELECT slug,owner_id,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at FROM rooms WHERE slug=ANY($1)`, keys)
+	rows, err := db.Query(ctx, `SELECT slug,owner_id,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at,category,tags FROM rooms WHERE slug=ANY($1)`, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -208,12 +224,34 @@ func roomDetails(ctx context.Context, db *pgxpool.Pool, keys []string) (map[stri
 	out := make(map[string]store.Room)
 	for rows.Next() {
 		var v store.Room
-		if err := rows.Scan(&v.Slug, &v.OwnerID, &v.Title, &v.Description, &v.ActiveSession, &v.Bilibili, &v.Notice, &v.Status, &v.Slow, &v.MuteAll, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.Slug, &v.OwnerID, &v.Title, &v.Description, &v.ActiveSession, &v.Bilibili, &v.Notice, &v.Status, &v.Slow, &v.MuteAll, &v.CreatedAt, &v.UpdatedAt, &v.Category, &v.Tags); err != nil {
 			return nil, err
 		}
 		out[v.Slug] = v
 	}
 	return out, rows.Err()
+}
+
+// putRoom requires c.mu.
+func (c *plazaCache) putRoom(v store.Room) {
+	if c.details == nil {
+		c.details = make(map[string]cached[store.Room])
+	}
+	if _, exists := c.details[v.Slug]; !exists && len(c.details) >= 512 {
+		for old := range c.details {
+			delete(c.details, old)
+			break
+		}
+	}
+	c.details[v.Slug] = cached[store.Room]{v, time.Now().Add(20 * time.Second)}
+}
+func (c *plazaCache) epoch() uint64 { c.mu.Lock(); defer c.mu.Unlock(); return c.generation }
+func (c *plazaCache) remember(generation uint64, v store.Room) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation == generation && v.OwnerID != 0 {
+		c.putRoom(v)
+	}
 }
 func (c *plazaCache) getDetails(ctx context.Context, ranks []rank, load func([]string) (map[string]store.Room, error)) (map[string]store.Room, error) {
 	out := make(map[string]store.Room)
@@ -253,9 +291,6 @@ func (c *plazaCache) getDetails(ctx context.Context, ranks []rank, load func([]s
 		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if c.details == nil {
-			c.details = make(map[string]cached[store.Room])
-		}
 		for _, slug := range keys {
 			v := rooms[slug]
 			if v.Slug == "" {
@@ -265,13 +300,7 @@ func (c *plazaCache) getDetails(ctx context.Context, ranks []rank, load func([]s
 			}
 			found[slug] = v
 			if c.generation == generation {
-				if len(c.details) >= 512 {
-					for old := range c.details {
-						delete(c.details, old)
-						break
-					}
-				}
-				c.details[slug] = cached[store.Room]{v, time.Now().Add(20 * time.Second)}
+				c.putRoom(v)
 			}
 		}
 		return found, nil
@@ -291,11 +320,43 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 		status = "all"
 	}
 	limit, ok := listLimit(r, 20, 50)
-	if !ok || (order != "hot" && order != "online" && order != "latest") || (status != "live" && status != "all") {
+	if !ok || (order != "hot" && order != "online" && order != "latest" && order != "recommend") || (status != "live" && status != "all") {
 		w.WriteHeader(400)
 		return
 	}
 	ctx := r.Context()
+	category := q.Get("category")
+	strategy := q.Get("strategy")
+	if q.Has("category") && recommend.CategoryName(category) == "" || q.Has("strategy") && !h.recommendations.Has(strategy) {
+		w.WriteHeader(400)
+		return
+	}
+	req := recommend.Request{Limit: limit, Status: status, Category: category, Now: time.Now()}
+	if order == "recommend" || q.Has("strategy") {
+		uid, e := h.viewer(r)
+		if e != nil && e != redis.Nil {
+			dbError(w, e)
+			return
+		}
+		if strategy == "" && order == "recommend" {
+			strategy = recommend.Bucket(uid)
+		}
+		if uid != 0 {
+			if s, ok := h.sessions.(profileStore); ok {
+				req.Profile, e = s.Preferences(ctx, uid)
+				if e != nil {
+					dbError(w, e)
+					return
+				}
+			}
+		}
+	}
+	if strategy == "" {
+		strategy = order
+	}
+	if category != "" || q.Has("strategy") {
+		order = "recommend"
+	}
 	db := h.db()
 	revision, err := h.sessions.RoomRevision(ctx)
 	if err != nil {
@@ -308,7 +369,8 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 		dbError(w, err)
 		return
 	}
-	ranks := idx.Ranks[:min(limit, len(idx.Ranks))]
+
+	ranks, reasons := h.selectRooms(ctx, idx, req, strategy, limit)
 	var details map[string]store.Room
 	if !idx.Degraded {
 		details, err = h.plaza.getDetails(ctx, ranks, func(keys []string) (map[string]store.Room, error) {
@@ -322,14 +384,15 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 				dbError(w, err)
 				return
 			}
-			ranks = idx.Ranks[:min(limit, len(idx.Ranks))]
+			ranks, reasons = h.selectRooms(ctx, idx, req, strategy, limit)
 			details = nil
 		}
 	}
 	type summary struct {
 		store.Room
 		pubsub.Activity
-		Degraded bool `json:"degraded,omitempty"`
+		Reason   string `json:"recommend_reason"`
+		Degraded bool   `json:"degraded,omitempty"`
 	}
 	rooms := make([]summary, 0, len(ranks))
 	for _, v := range ranks {
@@ -342,13 +405,45 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 			room.Title = v.Slug
 			room.Status = v.Status
 		}
+		if room.Category == "" {
+			room.Category = v.Category
+		}
+		if room.Tags == nil {
+			room.Tags = append([]string{}, v.Tags...)
+		}
 		if room.ActiveSession == "" {
 			room.ActiveSession = v.BusiestSession
 			if room.ActiveSession == "" {
 				room.ActiveSession = "live"
 			}
 		}
-		rooms = append(rooms, summary{room, v.Activity, idx.Degraded})
+		rooms = append(rooms, summary{room, v.Activity, reasons[v.Slug], idx.Degraded})
 	}
-	writeJSON(w, map[string]any{"rooms": rooms, "degraded": idx.Degraded})
+	writeJSON(w, map[string]any{"rooms": rooms, "strategy": strategy, "degraded": idx.Degraded})
+}
+
+func (h *ChatHandler) selectRooms(ctx context.Context, idx roomIndex, req recommend.Request, strategy string, limit int) ([]rank, map[string]string) {
+	snapshot := make(recommend.Snapshot, 0, len(idx.Ranks))
+	bySlug := make(map[string]rank, len(idx.Ranks))
+	for _, v := range idx.Ranks {
+		if v.Category == "" && idx.Degraded {
+			cached := h.plaza.knownRoom(v.Slug)
+			v.Category = cached.Category
+			v.Tags = cached.Tags
+			v.Created = cached.CreatedAt
+		}
+		if v.Category == "" {
+			v.Category = "chat"
+		}
+		bySlug[v.Slug] = v
+		snapshot = append(snapshot, recommend.Candidate{Slug: v.Slug, Status: v.Status, Category: v.Category, Tags: v.Tags, Created: v.Created, Started: v.Started, Heat: v.Heat, Online: v.Online})
+	}
+	selected := h.recommendations.Run(ctx, strategy, req, snapshot)
+	ranks := make([]rank, 0, min(limit, len(selected)))
+	reasons := map[string]string{}
+	for _, v := range selected[:min(limit, len(selected))] {
+		ranks = append(ranks, bySlug[v.Slug])
+		reasons[v.Slug] = v.Reason
+	}
+	return ranks, reasons
 }

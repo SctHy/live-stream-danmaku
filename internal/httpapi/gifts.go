@@ -129,6 +129,9 @@ func (h *ChatHandler) gifts(w http.ResponseWriter, r *http.Request) {
 		dbError(w, err)
 		return
 	}
+	if !duplicate {
+		h.recordInterest(ctx, login.UserID, r.PathValue("room"), 5)
+	}
 	if err = h.flushGifts(ctx, db, g.RoomID); err != nil {
 		dbError(w, err)
 		return

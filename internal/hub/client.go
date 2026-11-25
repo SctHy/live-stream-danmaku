@@ -31,6 +31,7 @@ type Client struct {
 	stats            chan *outboundFrame
 	UserID           uint64 // client id
 
+	Interest      func(weight int)
 	LoginNickname func(context.Context) (string, error)
 	nickname      string
 	RoomID        string

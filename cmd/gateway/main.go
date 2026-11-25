@@ -22,6 +22,7 @@ import (
 	"github.com/scthy/maku/internal/metrics"
 	"github.com/scthy/maku/internal/mq"
 	"github.com/scthy/maku/internal/pubsub"
+	"github.com/scthy/maku/internal/recommend"
 )
 
 func main() { os.Exit(run()) }
@@ -111,6 +112,7 @@ func run() (code int) {
 
 	r := http.NewServeMux()
 	handler := httpapi.NewChatHandler(history, m, sessions, *allowDev)
+	handler.SetRecommendations(recommend.Default())
 	handler.SetCommerce(plugins)
 	go m.Start()
 	handler.Routes(r)
