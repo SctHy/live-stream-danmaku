@@ -80,7 +80,7 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		m.reply(c, input.ClientMsgID, "filtered")
 		return
 	}
-	msg := protocol.DanmakuMessage{Nickname: c.nickname, EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
+	msg := protocol.DanmakuMessage{Color: input.Color, Mode: input.Mode, Nickname: c.nickname, EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
 	room, session, _ := strings.Cut(c.RoomID, "/")
 	if strings.HasPrefix(session, "obs-") {
 		if obs, ok := m.store.(interface {
@@ -127,6 +127,13 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		m.log.Warn("Redis publication failed", "error", err)
 	}
 	if status == "new" {
+		m.likesMu.Lock()
+		minute := msg.SendTime.Unix() / 60
+		if m.localHeat[minute] == nil {
+			m.localHeat[minute] = make(map[string]uint64)
+		}
+		m.localHeat[minute][room]++
+		m.likesMu.Unlock()
 		m.producer.Publish(c.RoomID, wire)
 		if c.Interest != nil {
 			c.Interest(2)

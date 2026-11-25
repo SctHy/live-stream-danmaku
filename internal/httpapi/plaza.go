@@ -89,6 +89,9 @@ func (c *plazaCache) invalidate(slug string) {
 	delete(c.details, slug)
 }
 func (h *ChatHandler) invalidateRoom(ctx context.Context, slug string) {
+	if cache, ok := h.sessions.(interface{ InvalidateOBS(string) }); ok {
+		cache.InvalidateOBS(slug)
+	}
 	h.plaza.invalidate(slug)
 	if err := h.sessions.BumpRoomRevision(ctx, slug); err != nil {
 		slog.Warn("Invalidate room metadata on peer gateways", "error", err)
@@ -216,7 +219,7 @@ func (h *ChatHandler) rankings(ctx context.Context, db *pgxpool.Pool, order, sta
 	})
 }
 func roomDetails(ctx context.Context, db *pgxpool.Pool, keys []string) (map[string]store.Room, error) {
-	rows, err := db.Query(ctx, `SELECT slug,owner_id,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at,category,tags FROM rooms WHERE slug=ANY($1)`, keys)
+	rows, err := db.Query(ctx, `SELECT slug,owner_id,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at,category,tags,cover_theme FROM rooms WHERE slug=ANY($1)`, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +227,7 @@ func roomDetails(ctx context.Context, db *pgxpool.Pool, keys []string) (map[stri
 	out := make(map[string]store.Room)
 	for rows.Next() {
 		var v store.Room
-		if err := rows.Scan(&v.Slug, &v.OwnerID, &v.Title, &v.Description, &v.ActiveSession, &v.Bilibili, &v.Notice, &v.Status, &v.Slow, &v.MuteAll, &v.CreatedAt, &v.UpdatedAt, &v.Category, &v.Tags); err != nil {
+		if err := rows.Scan(&v.Slug, &v.OwnerID, &v.Title, &v.Description, &v.ActiveSession, &v.Bilibili, &v.Notice, &v.Status, &v.Slow, &v.MuteAll, &v.CreatedAt, &v.UpdatedAt, &v.Category, &v.Tags, &v.CoverTheme); err != nil {
 			return nil, err
 		}
 		out[v.Slug] = v
@@ -405,6 +408,9 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 			room.Title = v.Slug
 			room.Status = v.Status
 		}
+		if room.CoverTheme == "" {
+			room.CoverTheme = "zinc"
+		}
 		if room.Category == "" {
 			room.Category = v.Category
 		}
@@ -417,7 +423,11 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 				room.ActiveSession = "live"
 			}
 		}
-		rooms = append(rooms, summary{room, v.Activity, reasons[v.Slug], idx.Degraded})
+		reason := reasons[v.Slug]
+		if room.Status != "live" {
+			reason = "暂未开播"
+		}
+		rooms = append(rooms, summary{room, v.Activity, reason, idx.Degraded})
 	}
 	writeJSON(w, map[string]any{"rooms": rooms, "strategy": strategy, "degraded": idx.Degraded})
 }

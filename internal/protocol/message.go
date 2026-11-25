@@ -31,6 +31,8 @@ type WsPacket struct {
 
 // DanmakuMessage is a persisted event and the WebSocket chat payload.
 type DanmakuMessage struct {
+	Color         string    `json:"color,omitempty"`
+	Mode          string    `json:"mode,omitempty"`
 	VideoOffsetMS *int64    `json:"video_offset_ms,omitempty"`
 	Nickname      string    `json:"nickname,omitempty"`
 	ClientMsgID   string    `json:"client_msg_id,omitempty"`
@@ -44,9 +46,18 @@ type DanmakuMessage struct {
 
 // FitsHistory checks the PostgreSQL text limits before publishing or batching.
 func (d DanmakuMessage) FitsHistory() bool {
-	return (d.VideoOffsetMS == nil || *d.VideoOffsetMS >= 0) && utf8.RuneCountInString(d.RoomID) <= 50 && utf8.RuneCountInString(d.Content) <= 500 &&
+	return ValidStyle(d.Color, d.Mode) && (d.VideoOffsetMS == nil || *d.VideoOffsetMS >= 0) && utf8.RuneCountInString(d.RoomID) <= 50 && utf8.RuneCountInString(d.Content) <= 500 &&
 		utf8.RuneCountInString(d.Nickname) <= 24 && !strings.ContainsRune(d.Nickname, 0) &&
 		!strings.ContainsRune(d.RoomID, 0) && !strings.ContainsRune(d.Content, 0) && !strings.ContainsRune(d.EventID, 0)
+}
+
+func ValidStyle(color, mode string) bool {
+	switch color {
+	case "", "#ffffff", "#34d399", "#38bdf8", "#facc15", "#fb7185", "#c084fc":
+	default:
+		return false
+	}
+	return mode == "" || mode == "scroll" || mode == "top" || mode == "bottom"
 }
 
 // LiveDanmaku is an ephemeral upstream chat event.

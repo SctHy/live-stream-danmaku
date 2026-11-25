@@ -3,6 +3,7 @@ package pubsub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -78,14 +79,14 @@ func (s *Store) RefreshLogin(ctx context.Context, token string, v Login) error {
 		return redis.Nil
 	}
 	// All tokens issued before this rename expire within their original lifetime.
-	return s.r.Set(ctx, profile, v.Nickname, 7*24*time.Hour).Err()
+	return s.changeLogin(ctx, profile, profile, "rename", v.Nickname)
 }
 func (s *Store) Logout(ctx context.Context, token string) error {
-	key, _, ok := loginKeys(token)
+	key, profile, ok := loginKeys(token)
 	if !ok {
 		return nil
 	}
-	return s.r.Del(ctx, key).Err()
+	return s.changeLogin(ctx, key, profile, "logout", "")
 }
 
 // Keep metadata and the single value read by the publish hot path in sync.
@@ -150,4 +151,71 @@ func (s *Store) Mutes(ctx context.Context, room string) ([]MuteRecord, error) {
 		out = append(out, MuteRecord{uid, (until + 999) / 1000})
 	}
 	return out, err
+}
+
+// Cache leases share the account's slot. A completed profile edit or logout
+// fences readers on other gateways even if a peer is unreachable.
+const nicknameTTL = 2 * time.Second
+
+var socketLogin = redis.NewScript(`
+local ttl=redis.call('PTTL',KEYS[1])
+if ttl==-2 then return false end
+if ttl~=-1 and ttl<tonumber(ARGV[2]) then return {'','','short'} end
+local reader=redis.call('GET',KEYS[3])
+redis.call('SET',KEYS[3],(reader and reader~=ARGV[1]) and '*' or ARGV[1],'PX',ARGV[2])
+return {redis.call('GET',KEYS[1]),redis.call('GET',KEYS[2]) or '', 'ok'}`)
+var shortLogin = errors.New("session near expiration")
+
+func (s *Store) SocketNickname(ctx context.Context, token string) (string, error) {
+	key, profile, ok := loginKeys(token)
+	if !ok {
+		return "", redis.Nil
+	}
+	name, err := s.names.Load(key, nicknameTTL, func() (string, error) {
+		values, err := socketLogin.Run(ctx, s.r, []string{key, profile, profile + ":readers"}, s.peer, nicknameTTL.Milliseconds()).StringSlice()
+		if err != nil {
+			return "", err
+		}
+		if values[2] == "short" {
+			return "", shortLogin
+		}
+		if values[1] != "" {
+			return values[1], nil
+		}
+		var login Login
+		err = json.Unmarshal([]byte(values[0]), &login)
+		return login.Nickname, err
+	})
+	if errors.Is(err, shortLogin) {
+		v, err := s.Login(ctx, token)
+		return v.Nickname, err
+	}
+	return name, err
+}
+
+var editLogin = redis.NewScript(`
+if ARGV[1]=='rename' then redis.call('SET',KEYS[1],ARGV[2],'EX',604800)
+else redis.call('DEL',KEYS[1]) end
+if redis.call('GET',KEYS[2])~=ARGV[3] then return redis.call('PTTL',KEYS[2]) end
+return 0`)
+
+func (s *Store) changeLogin(ctx context.Context, key, profile, action, value string) error {
+	wait, err := editLogin.Run(ctx, s.r, []string{key, profile + ":readers"}, action, value, s.peer).Int64()
+	if action == "logout" {
+		s.names.Invalidate(key)
+	} else {
+		prefix := strings.TrimSuffix(profile, "nickname") + "token:"
+		s.names.InvalidateMatching(func(key string) bool { return strings.HasPrefix(key, prefix) })
+	}
+	if err != nil || wait <= 0 {
+		return err
+	}
+	timer := time.NewTimer(time.Duration(wait+1) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

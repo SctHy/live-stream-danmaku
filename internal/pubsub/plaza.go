@@ -18,9 +18,30 @@ if #KEYS==2 and not redis.call('SET',KEYS[2],'1','NX','EX',900) then return 0 en
 redis.call('ZINCRBY',KEYS[1],ARGV[2],ARGV[1])
 return redis.call('EXPIRE',KEYS[1],900)`)
 
-func (s *Store) addHeat(ctx context.Context, room string, score float64) error {
-	slug, _, _ := strings.Cut(room, "/")
-	return heatIncrement.Run(ctx, s.r, []string{minuteKey(time.Now())}, slug, score).Err()
+type HeatBatch struct {
+	Minute int64
+	ID     string
+	Rooms  map[string]uint64
+}
+
+var flushHeat = redis.NewScript(`
+if not redis.call('SET',KEYS[2],'1','EX',900,'NX') then return 0 end
+for i=1,#ARGV,2 do redis.call('ZINCRBY',KEYS[1],ARGV[i+1],ARGV[i]) end
+return redis.call('EXPIRE',KEYS[1],900)`)
+
+// FlushHeat applies minute buckets in one pipeline. Stable batch IDs allow
+// replay after an ambiguous network failure without duplicating scores.
+func (s *Store) FlushHeat(ctx context.Context, batches []HeatBatch) error {
+	p := s.r.Pipeline()
+	for _, b := range batches {
+		args := make([]any, 0, 2*len(b.Rooms))
+		for room, count := range b.Rooms {
+			args = append(args, room, count)
+		}
+		flushHeat.Eval(ctx, p, []string{minuteKey(time.Unix(b.Minute*60, 0)), "dm:{hot}:batch:" + b.ID}, args...)
+	}
+	_, err := p.Exec(ctx)
+	return err
 }
 
 var onlineKeys = []string{"dm:{hot}:online", "dm:{hot}:sessions", "dm:{hot}:leases"}
@@ -53,10 +74,8 @@ type Activity struct {
 }
 
 func (s *Store) Activity(ctx context.Context) (map[string]Activity, error) {
-	if err := pruneOnline.Run(ctx, s.r, onlineKeys).Err(); err != nil {
-		return nil, err
-	}
 	p := s.r.Pipeline()
+	pruneOnline.Eval(ctx, p, onlineKeys)
 	keys := make([]string, 10)
 	now := time.Now()
 	for i := range keys {

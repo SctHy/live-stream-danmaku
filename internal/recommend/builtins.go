@@ -101,6 +101,9 @@ func (p recall) Recall(ctx context.Context, q Request, s Snapshot) []Candidate {
 		out = eligible
 		sort.Slice(out, func(i, j int) bool {
 			a, b := out[i], out[j]
+			if (a.Status == "live") != (b.Status == "live") {
+				return a.Status == "live"
+			}
 			if p == "hot" && a.Heat != b.Heat {
 				return a.Heat > b.Heat
 			}
@@ -148,10 +151,18 @@ func (p scorer) Score(q Request, items []Candidate) []ScoredCandidate {
 				v.Reason = "新开播推荐"
 			}
 		}
+		if c.Status != "live" {
+			v.Reason = "暂未开播"
+		} else if v.Reason == "热门直播" && c.Heat == 0 && c.Online == 0 {
+			v.Reason = ""
+		}
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
+		if (p == "explore_v1" || p == "personalized_v1") && (a.Status == "live") != (b.Status == "live") {
+			return a.Status == "live"
+		}
 		if p == "latest" && !a.Created.Equal(b.Created) {
 			return a.Created.After(b.Created)
 		}
@@ -183,8 +194,8 @@ func (p reranker) Rerank(q Request, in []ScoredCandidate) []ScoredCandidate {
 		for j < len(in) && in[j].Category == cat {
 			j++
 		}
-		if j == len(in) {
-			break
+		if j == len(in) || in[j].Status != in[i].Status {
+			continue
 		}
 		pick := in[j]
 		copy(in[i+1:j+1], in[i:j])

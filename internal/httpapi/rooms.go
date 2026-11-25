@@ -59,7 +59,7 @@ func (h *ChatHandler) loadAccess(r *http.Request, legacy bool) (roomAccess, erro
 	name := r.PathValue("room")
 	a.room, err = store.LoadRoom(ctx, tx, name, r.Method != "GET")
 	if errors.Is(err, pgx.ErrNoRows) {
-		a.room = store.Room{Slug: name, Title: name, Category: "chat", Tags: []string{}, ActiveSession: "live", RoomControls: protocol.RoomControls{Status: "live"}}
+		a.room = store.Room{Slug: name, Title: name, CoverTheme: "zinc", Category: "chat", Tags: []string{}, ActiveSession: "live", RoomControls: protocol.RoomControls{Status: "live"}}
 		err = nil
 	}
 	if err == nil {
@@ -94,6 +94,11 @@ func normalizeTags(tags []string) ([]string, bool) {
 	return out, true
 }
 func validRoom(v store.Room) bool {
+	switch v.CoverTheme {
+	case "zinc", "emerald", "ocean", "amber", "violet", "rose":
+	default:
+		return false
+	}
 	return recommend.CategoryName(v.Category) != "" && slug.MatchString(v.Slug) && validText(v.Title, 1, 100) && validText(v.Description, 0, 1000) && validText(v.Notice, 0, 1000) && slug.MatchString(v.ActiveSession) && (v.Bilibili == "" || numericRoom.MatchString(v.Bilibili)) && (v.Status == "live" || v.Status == "offline") && v.Slow >= 0 && v.Slow <= 300
 }
 func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +111,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 		}
 		var in struct {
 			Slug, Title, Description string
+			CoverTheme               *string `json:"cover_theme"`
 			Category                 *string
 			Tags                     []string
 			Bilibili                 string `json:"bilibili_room_id"`
@@ -114,6 +120,10 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v := store.Room{Slug: in.Slug, Title: in.Title, Description: in.Description, Bilibili: in.Bilibili, OwnerID: login.UserID, ActiveSession: "live", RoomControls: protocol.RoomControls{Status: "live"}}
+		v.CoverTheme = "zinc"
+		if in.CoverTheme != nil {
+			v.CoverTheme = *in.CoverTheme
+		}
 		v.Category = "chat"
 		if in.Category != nil {
 			v.Category = *in.Category
@@ -129,7 +139,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-			err := tx.QueryRow(ctx, "INSERT INTO rooms(slug,owner_id,title,description,bilibili_room_id,category,tags) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING created_at,updated_at", v.Slug, v.OwnerID, v.Title, v.Description, v.Bilibili, v.Category, v.Tags).Scan(&v.CreatedAt, &v.UpdatedAt)
+			err := tx.QueryRow(ctx, "INSERT INTO rooms(slug,owner_id,title,description,bilibili_room_id,category,tags,cover_theme) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at,updated_at", v.Slug, v.OwnerID, v.Title, v.Description, v.Bilibili, v.Category, v.Tags, v.CoverTheme).Scan(&v.CreatedAt, &v.UpdatedAt)
 			if err != nil {
 				return err
 			}
@@ -157,7 +167,17 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 	v := a.room
 	if r.Method == "GET" {
 		h.plaza.remember(generation, v)
-		writeJSON(w, roomView{v, a.role})
+		var count int64
+		var following bool
+		if err := a.tx.QueryRow(ctx, "SELECT count(*),count(*) FILTER(WHERE user_id=$2)>0 FROM room_follows WHERE room_slug=$1", v.Slug, a.actor).Scan(&count, &following); err != nil {
+			dbError(w, err)
+			return
+		}
+		writeJSON(w, struct {
+			roomView
+			Count     int64 `json:"follower_count"`
+			Following bool  `json:"following"`
+		}{roomView{v, a.role}, count, following})
 		return
 	}
 	if a.role != "owner" {
@@ -168,7 +188,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &fields) {
 		return
 	}
-	dest := map[string]any{"category": &v.Category, "tags": &v.Tags, "title": &v.Title, "description": &v.Description, "bilibili_room_id": &v.Bilibili, "active_session": &v.ActiveSession, "slow_mode_seconds": &v.Slow, "mute_all": &v.MuteAll, "status": &v.Status, "notice": &v.Notice}
+	dest := map[string]any{"cover_theme": &v.CoverTheme, "category": &v.Category, "tags": &v.Tags, "title": &v.Title, "description": &v.Description, "bilibili_room_id": &v.Bilibili, "active_session": &v.ActiveSession, "slow_mode_seconds": &v.Slow, "mute_all": &v.MuteAll, "status": &v.Status, "notice": &v.Notice}
 	for k, raw := range fields {
 		p, ok := dest[k]
 		if !ok || string(raw) == "null" || json.Unmarshal(raw, p) != nil {

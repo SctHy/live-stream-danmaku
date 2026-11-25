@@ -23,6 +23,7 @@ type broadcastJob struct {
 }
 
 type roomStore interface {
+	FlushHeat(context.Context, []pubsub.HeatBatch) error
 	AcceptDanmaku(context.Context, protocol.DanmakuMessage, []byte) (string, string, error)
 	Policy(context.Context, string, uint64, int) (string, error)
 	SnapshotStats(context.Context, string, map[string]int, map[string]uint64, time.Duration) (map[string]protocol.StatsData, error)
@@ -86,8 +87,11 @@ type Hub struct {
 
 	deliveryQueues []chan *broadcastJob
 
-	localLikes map[string]uint64
-	likesMu    sync.Mutex
+	localHeat    map[int64]map[string]uint64
+	pendingHeat  []pubsub.HeatBatch // owned by the statistics worker until Start returns
+	statsStopped chan struct{}
+	localLikes   map[string]uint64
+	likesMu      sync.Mutex
 }
 
 const (
@@ -149,6 +153,8 @@ func New(cfg Config) *Hub {
 		drained:        make(chan struct{}),
 		register:       make(chan *Client),
 		unregister:     make(chan *Client),
+		localHeat:      make(map[int64]map[string]uint64),
+		statsStopped:   make(chan struct{}),
 		localLikes:     make(map[string]uint64),
 		rooms:          make(map[string]map[*Client]struct{}),
 		ready:          make(map[string]<-chan struct{}),
@@ -174,6 +180,9 @@ func New(cfg Config) *Hub {
 
 func (m *Hub) Start() {
 	m.log.Info("Hub started")
+	defer close(m.statsStopped)
+	var stats sync.WaitGroup
+	defer stats.Wait()
 	m.startWorkers()
 	close(m.started)
 	statsTicker := time.NewTicker(statsInterval)
@@ -189,7 +198,7 @@ func (m *Hub) Start() {
 			m.handleUnregister(client)
 		case <-statsTicker.C:
 			if m.statsRunning.CompareAndSwap(false, true) {
-				go func() { defer m.statsRunning.Store(false); m.broadcastStats() }()
+				stats.Go(func() { defer m.statsRunning.Store(false); m.broadcastStats() })
 			}
 		}
 	}
@@ -221,6 +230,8 @@ func (m *Hub) Drain(ctx context.Context) error {
 	m.ingress.Unlock()
 	m.publishing.Wait()
 	m.stop()
+	<-m.statsStopped
+	m.flushHeat(ctx)
 	m.closeClients()
 	if m.liveBridge != nil {
 		m.liveBridge.Close()

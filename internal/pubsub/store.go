@@ -2,10 +2,12 @@ package pubsub
 
 import (
 	"context"
+	"crypto/rand"
 	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/maku/internal/ttlcache"
 )
 
 const (
@@ -16,6 +18,9 @@ const (
 )
 
 type Store struct {
+	peer                                           string
+	names                                          ttlcache.Cache[string, string]
+	obs                                            ttlcache.Cache[string, OBSStream]
 	r                                              redis.UniversalClient
 	appendEvent, acceptEvent, allowAction, cleanup *redis.Script
 }
@@ -38,6 +43,7 @@ func (s *Store) Mux(ctx context.Context, n int) *Mux { return NewMux(ctx, s.r, n
 
 func newStore(r redis.UniversalClient) *Store {
 	return &Store{r: r,
+		peer:        rand.Text(),
 		appendEvent: redis.NewScript(appendEventLua), acceptEvent: redis.NewScript(acceptEventLua),
 		allowAction: redis.NewScript(allowActionLua), cleanup: redis.NewScript(removeExpiredServerLua),
 	}

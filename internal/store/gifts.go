@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -55,7 +56,13 @@ func Checkin(ctx context.Context, db *pgxpool.Pool, uid uint64) (claimed bool, b
 
 func BuyGift(ctx context.Context, db *pgxpool.Pool, g GiftOrder, pin int) (order GiftOrder, balance int64, duplicate bool, err error) {
 	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-		// Serialize purchases for this wallet before inspecting its idempotency key.
+		var owner uint64
+		if err := tx.QueryRow(ctx, "SELECT coalesce((SELECT owner_id FROM rooms WHERE slug=$1),0)", g.RoomSlug).Scan(&owner); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "SELECT id FROM users WHERE id IN ($1,$2) ORDER BY id FOR UPDATE", owner, g.SenderID); err != nil {
+			return err
+		}
 		if e := tx.QueryRow(ctx, "SELECT balance,nickname FROM users WHERE id=$1 FOR UPDATE", g.SenderID).Scan(&balance, &g.SenderName); e != nil {
 			return e
 		}
@@ -85,6 +92,16 @@ func BuyGift(ctx context.Context, db *pgxpool.Pool, g GiftOrder, pin int) (order
 		g.ComboCount = 1
 		e = tx.QueryRow(ctx, `INSERT INTO gift_orders(client_order_id,room_id,room_slug,sender_id,sender_name,gift_code,gift_name,quantity,unit_price,total_cost,message,pinned_until,effect_type,combo_key)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now()+NULLIF($12::int,0)*interval '1 second',$13,$14) RETURNING id,created_at,pinned_until`, g.ClientOrderID, g.RoomID, g.RoomSlug, g.SenderID, g.SenderName, g.GiftCode, g.GiftName, g.Quantity, g.UnitPrice, g.TotalCost, g.Message, pin, g.EffectType, g.ComboKey).Scan(&g.ID, &g.CreatedAt, &g.PinnedUntil)
+		if e != nil {
+			return e
+		}
+		// Divide first so flooring the 70% share cannot overflow int64.
+		share := g.TotalCost/10*7 + g.TotalCost%10*7/10
+		if owner != 0 && owner != g.SenderID && share > 0 {
+			_, e = tx.Exec(ctx, `WITH earned AS (UPDATE users SET earnings=earnings+$2 WHERE id=$1 RETURNING id,earnings)
+ INSERT INTO wallet_ledger(user_id,biz_type,biz_id,delta,balance_before,balance_after)
+ SELECT id,'gift_income',$3,$2,earnings-$2,earnings FROM earned`, owner, share, fmt.Sprintf("gift:%d", g.ID))
+		}
 		order = g
 		return e
 	})

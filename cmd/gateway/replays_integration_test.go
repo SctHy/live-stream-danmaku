@@ -105,7 +105,7 @@ func TestOBSReplayLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.current.Store(nil)
-		if err = ws.WriteJSON(map[string]any{"type": 101, "data": map[string]string{"content": "archived"}}); err != nil {
+		if err = ws.WriteJSON(map[string]any{"type": 101, "data": map[string]string{"content": "archived", "color": "#34d399", "mode": "top"}}); err != nil {
 			t.Fatal(err)
 		}
 		for pkt.Type != protocol.TypeDanmaku {
@@ -114,13 +114,13 @@ func TestOBSReplayLifecycle(t *testing.T) {
 			}
 		}
 		var msg protocol.DanmakuMessage
-		if err = json.Unmarshal(pkt.Data, &msg); err != nil || msg.VideoOffsetMS == nil {
+		if err = json.Unmarshal(pkt.Data, &msg); err != nil || msg.VideoOffsetMS == nil || msg.Color != "#34d399" || msg.Mode != "top" {
 			t.Fatal("missing live offset", err)
 		}
 		h.current.Store(pool)
 		for deadline := time.Now().Add(15 * time.Second); ; {
 			var exists bool
-			err = pool.db.QueryRow(ctx, "SELECT EXISTS(SELECT FROM danmaku_messages WHERE event_id=$1 AND video_offset_ms=$2)", msg.EventID, *msg.VideoOffsetMS).Scan(&exists)
+			err = pool.db.QueryRow(ctx, "SELECT EXISTS(SELECT FROM danmaku_messages WHERE event_id=$1 AND video_offset_ms=$2 AND color='#34d399' AND mode='top')", msg.EventID, *msg.VideoOffsetMS).Scan(&exists)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,11 +151,25 @@ func TestOBSReplayLifecycle(t *testing.T) {
 		if w.Code != 206 || w.Body.String() != "234" {
 			t.Fatal("range", w.Code, w.Body)
 		}
+		// Repeated Range reads reuse the ready path within its TTL.
+		if _, err = pool.db.Exec(ctx, "UPDATE room_replays SET video_path='unavailable.mp4' WHERE id=$1", int64(active["replay_id"].(float64))); err != nil {
+			t.Fatal(err)
+		}
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != 206 || w.Body.String() != "234" {
+			t.Fatal("uncached range", w.Code)
+		}
+		if _, err = pool.db.Exec(ctx, "UPDATE room_replays SET video_path='video.mp4' WHERE id=$1", int64(active["replay_id"].(float64))); err != nil {
+			t.Fatal(err)
+		}
 		timeline := path + "/danmaku"
 		cookie = nil
 		call("POST", timeline, `{"content":"anonymous","video_offset_ms":0}`, 401)
 		cookie = owner
 		call("POST", timeline, `{"content":"replay-blocked-word","video_offset_ms":0}`, 400)
+		call("POST", timeline, `{"content":"bad color","color":"red","video_offset_ms":0}`, 400)
+		call("POST", timeline, `{"content":"bad mode","mode":"side","video_offset_ms":0}`, 400)
 		call("POST", timeline, `{"content":"late","video_offset_ms":125001}`, 400)
 		call("GET", timeline+"?to_ms=300001", "", 400)
 		call("GET", timeline+"?after_id=2", "", 400)
@@ -171,7 +185,7 @@ func TestOBSReplayLifecycle(t *testing.T) {
 			t.Fatal("ended stream still active")
 		}
 		for range 12 {
-			call("POST", timeline, `{"content":"same millisecond","video_offset_ms":60000}`, 200)
+			call("POST", timeline, `{"content":"same millisecond","video_offset_ms":60000,"color":"#fb7185","mode":"bottom"}`, 200)
 		}
 		if err = repo.Withdraw(ctx, room+"/"+session, msg.EventID); err != nil {
 			t.Fatal(err)
@@ -184,6 +198,9 @@ func TestOBSReplayLifecycle(t *testing.T) {
 		for {
 			p := call("GET", timeline+"?from_ms=60000&limit=3"+cursor, "", 200)
 			for _, raw := range p["items"].([]any) {
+				if raw.(map[string]any)["color"] != "#fb7185" || raw.(map[string]any)["mode"] != "bottom" {
+					t.Fatal(raw)
+				}
 				id := raw.(map[string]any)["id"].(float64)
 				if seen[id] {
 					t.Fatal("duplicate cursor item")
@@ -206,6 +223,12 @@ func TestOBSReplayLifecycle(t *testing.T) {
 		if len(legacy) != 1 || legacy[0].(map[string]any)["content"] != "legacy" {
 			t.Fatal("legacy timeline", legacy)
 		}
+		d := call("GET", path+"/density?buckets=10", "", 200)
+		buckets := d["buckets"].([]any)
+		if len(buckets) != 10 || buckets[0] != float64(1) || buckets[5] != float64(12) || d["max_count"] != float64(12) {
+			t.Fatal(d)
+		}
+		call("GET", path+"/density?buckets=9", "", 400)
 		if listing := call("GET", base+"/replays?limit=1", "", 200); len(listing["items"].([]any)) != 1 {
 			t.Fatal(listing)
 		}
@@ -235,8 +258,13 @@ func TestOBSReplayLifecycle(t *testing.T) {
 			t.Fatal("missing recording", stopped)
 		}
 		call("DELETE", path, "", 204)
+
 		if _, err = os.Stat(filepath.Join(dir, "video.mp4")); !os.IsNotExist(err) {
 			t.Fatal("video still present", err)
 		}
+		if err = os.WriteFile(filepath.Join(dir, "video.mp4"), []byte("reused"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		call("GET", "/api/replays/"+id+"/video", "", 404)
 	})
 }

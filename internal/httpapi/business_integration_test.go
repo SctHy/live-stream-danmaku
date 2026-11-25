@@ -123,6 +123,29 @@ func TestBusinessRoutesIntegration(t *testing.T) {
 	}
 	base := "/api/rooms/" + room
 	expect("POST", "/api/rooms", fmt.Sprintf(`{"slug":%q,"title":"old","category":"coding","tags":[%q," Go ","Go"," "]} `, slug, slug), token, 201)
+	followPath := "/api/rooms/" + slug + "/follow"
+	expect("POST", followPath, "", "", 401)
+	for range 2 {
+		expect("POST", followPath, "", modToken, 204)
+	}
+	detail := expect("GET", "/api/rooms/"+slug, "", modToken, 200)
+	if detail["following"] != true || detail["follower_count"] != float64(1) || detail["cover_theme"] != "zinc" {
+		t.Fatal(detail)
+	}
+	followed := expect("GET", "/api/me/following", "", modToken, 200)["rooms"].([]any)
+	if len(followed) != 1 || followed[0].(map[string]any)["slug"] != slug {
+		t.Fatal(followed)
+	}
+	for range 2 {
+		expect("DELETE", followPath, "", modToken, 204)
+	}
+	if expect("GET", "/api/rooms/"+slug, "", modToken, 200)["follower_count"] != float64(0) {
+		t.Fatal("unfollow")
+	}
+	expect("PATCH", "/api/rooms/"+slug, `{"cover_theme":"invalid"}`, token, 400)
+	if expect("PATCH", "/api/rooms/"+slug, `{"cover_theme":"ocean"}`, token, 200)["cover_theme"] != "ocean" {
+		t.Fatal("theme")
+	}
 	var wg sync.WaitGroup
 	var claims, orders, spent atomic.Int32
 	for range 12 {
@@ -420,4 +443,28 @@ func TestBusinessRoutesIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	secondSlug := rand.Text()[:16]
+	expect("POST", "/api/rooms", fmt.Sprintf(`{"slug":%q,"title":"Second","cover_theme":"rose"}`, secondSlug), modToken, 201)
+	for _, pair := range []struct{ slug, token string }{{secondSlug, token}, {slug, modToken}} {
+		wg.Go(func() {
+			for i := range 4 {
+				status, _ := call("POST", "/api/rooms/"+pair.slug+"/live/gifts", fmt.Sprintf(`{"client_order_id":"reciprocal-gift-%04d","gift_code":"glowstick","quantity":1}`, i), pair.token)
+				if status != 200 {
+					t.Errorf("reciprocal gift %d", status)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	for _, id := range []uint64{uid, 2} {
+		var earned, share, debit, spent, balance int64
+		if err := db.QueryRow(ctx, `SELECT earnings,balance,
+ (SELECT sum(delta) FROM wallet_ledger WHERE user_id=$1 AND biz_type='gift_income'),
+ (SELECT sum(total_cost*70/100) FROM gift_orders WHERE room_slug IN (SELECT slug FROM rooms WHERE owner_id=$1) AND sender_id<>$1),
+ (SELECT sum(delta) FROM wallet_ledger WHERE user_id=$1 AND biz_type<>'gift_income')
+ FROM users WHERE id=$1`, id).Scan(&earned, &balance, &share, &spent, &debit); err != nil || earned != share || share != spent || share == 0 || balance != 1000+debit {
+			t.Fatal(earned, share, spent, balance, debit, err)
+		}
+	}
+
 }

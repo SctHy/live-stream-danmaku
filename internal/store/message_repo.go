@@ -33,8 +33,11 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 	contents := make([]string, len(msgs))
 	names := make([]string, len(msgs))
 	times := make([]time.Time, len(msgs))
+	colors := make([]string, len(msgs))
+	modes := make([]string, len(msgs))
 	offsets := make([]*int64, len(msgs))
 	for i, msg := range msgs {
+		colors[i], modes[i] = msg.Color, msg.Mode
 		offsets[i] = msg.VideoOffsetMS
 		ids[i] = msg.EventID
 		rooms[i] = msg.RoomID
@@ -44,11 +47,11 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 		names[i] = msg.Nickname
 		times[i] = msg.SendTime
 	}
-	tag, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time,nickname,video_offset_ms)
- SELECT id, room, uid::numeric, body, sent,nickname,video_offset_ms
- FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[],$6::text[], $7::bigint[])
- AS batch(id, room, uid, body, sent,nickname,video_offset_ms)
- ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times, names, offsets)
+	tag, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time,nickname,video_offset_ms,color,mode)
+ SELECT id, room, uid::numeric, body, sent,nickname,video_offset_ms,coalesce(nullif(color,''),'#ffffff'),coalesce(nullif(mode,''),'scroll')
+ FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[],$6::text[], $7::bigint[],$8::text[],$9::text[])
+ AS batch(id, room, uid, body, sent,nickname,video_offset_ms,color,mode)
+ ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times, names, offsets, colors, modes)
 	return tag.RowsAffected(), err
 }
 
@@ -70,7 +73,7 @@ func (r *MessageRepo) SearchHistory(ctx context.Context, room string, beforeID u
 	if beforeID > math.MaxInt64 {
 		beforeID = 0
 	}
-	query := `SELECT m.id,coalesce(m.event_id,''),m.room_id,m.user_id::text,m.content,m.send_time,m.nickname
+	query := `SELECT m.id,coalesce(m.event_id,''),m.room_id,m.user_id::text,m.content,m.send_time,m.nickname,m.color,m.mode
  FROM danmaku_messages m WHERE m.room_id=$1 AND ($2::bigint=0 OR m.id<$2)
  AND NOT EXISTS (SELECT 1 FROM danmaku_withdrawals w WHERE w.room_id=m.room_id AND w.event_id=m.event_id)
 `
@@ -92,7 +95,7 @@ func (r *MessageRepo) SearchHistory(ctx context.Context, room string, beforeID u
 	for rows.Next() {
 		var m protocol.DanmakuMessage
 		var uid string
-		if err := rows.Scan(&m.ID, &m.EventID, &m.RoomID, &uid, &m.Content, &m.SendTime, &m.Nickname); err != nil {
+		if err := rows.Scan(&m.ID, &m.EventID, &m.RoomID, &uid, &m.Content, &m.SendTime, &m.Nickname, &m.Color, &m.Mode); err != nil {
 			return nil, false, err
 		}
 		m.UserID, err = strconv.ParseUint(uid, 10, 64)

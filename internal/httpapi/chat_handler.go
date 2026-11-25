@@ -24,6 +24,7 @@ import (
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
 	"github.com/scthy/maku/internal/recommend"
+	"github.com/scthy/maku/internal/ttlcache"
 )
 
 //go:embed all:web
@@ -56,6 +57,7 @@ type sessionStore interface {
 	RefreshLogin(context.Context, string, pubsub.Login) error
 }
 type ChatHandler struct {
+	videos          ttlcache.Cache[int64, replayFile]
 	recommendations *recommend.Registry
 	profileSlots    chan struct{}
 	liveResolver    *liveResolver
@@ -214,6 +216,11 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 		cookie, _ := r.Cookie(loginCookie)
 		token := cookie.Value
 		client.LoginNickname = func(ctx context.Context) (string, error) {
+			if cached, ok := h.sessions.(interface {
+				SocketNickname(context.Context, string) (string, error)
+			}); ok {
+				return cached.SocketNickname(ctx, token)
+			}
 			v, err := h.sessions.Login(ctx, token)
 			return v.Nickname, err
 		}

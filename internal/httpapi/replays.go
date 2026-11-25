@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/scthy/maku/internal/protocol"
 )
 
 func replayRoot() string { return setting("REPLAY_STORAGE_DIR", "./data/replays") }
@@ -61,6 +62,12 @@ func openVideo(name string) (*os.File, fs.FileInfo, error) {
 	}
 	return f, st, nil
 }
+
+type replayFile struct {
+	path string
+	info fs.FileInfo
+}
+
 func (h *ChatHandler) video(w http.ResponseWriter, r *http.Request) {
 	db := h.db()
 	if db == nil {
@@ -71,20 +78,43 @@ func (h *ChatHandler) video(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var path string
-	err := db.QueryRow(r.Context(), "SELECT video_path FROM room_replays WHERE id=$1 AND status='ready'", id).Scan(&path)
-	if err != nil {
-		dbError(w, err)
+	for range 2 {
+		var f *os.File
+		var st fs.FileInfo
+		cached, err := h.videos.Load(id, 30*time.Second, func() (replayFile, error) {
+			var v replayFile
+			if err := db.QueryRow(r.Context(), "SELECT video_path FROM room_replays WHERE id=$1 AND status='ready'", id).Scan(&v.path); err != nil {
+				return v, err
+			}
+			var err error
+			f, st, err = openVideo(v.path)
+			if err != nil {
+				return v, pgx.ErrNoRows
+			}
+			v.info = st
+			return v, nil
+		})
+		if err != nil {
+			dbError(w, err)
+			return
+		}
+		if f == nil {
+			f, st, err = openVideo(cached.path)
+			// A delete on a peer may have released this path for a different replay.
+			if err != nil || !os.SameFile(st, cached.info) || st.Size() != cached.info.Size() || !st.ModTime().Equal(cached.info.ModTime()) {
+				if f != nil {
+					f.Close()
+				}
+				h.videos.Invalidate(id)
+				continue
+			}
+		}
+		defer f.Close()
+		w.Header().Set("Content-Type", "video/mp4")
+		http.ServeContent(w, r, st.Name(), st.ModTime(), f)
 		return
 	}
-	f, st, err := openVideo(path)
-	if err != nil {
-		w.WriteHeader(404)
-		return
-	}
-	defer f.Close()
-	w.Header().Set("Content-Type", "video/mp4")
-	http.ServeContent(w, r, st.Name(), st.ModTime(), f)
+	w.WriteHeader(404)
 }
 func replayID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -118,7 +148,7 @@ type replayView struct {
 
 const visibleMessage = `NOT EXISTS (SELECT FROM danmaku_withdrawals w WHERE w.room_id=m.room_id AND w.event_id=m.event_id)`
 const replaySelect = `SELECT p.id,p.session_id,p.title,p.status,p.started_at,p.ended_at,p.duration_ms,
- (SELECT count(*) FROM danmaku_messages m WHERE m.room_id=p.room_id AND (m.video_offset_ms IS NOT NULL OR m.send_time BETWEEN p.started_at AND coalesce(p.ended_at,now())) AND ` + visibleMessage + `) FROM room_replays p WHERE p.room_slug=$1`
+ CASE WHEN p.status='ready' THEN coalesce(p.visible_count,ready_replay_count(p.id)) ELSE (SELECT count(*) FROM danmaku_messages m WHERE m.room_id=p.room_id AND (m.video_offset_ms IS NOT NULL OR m.send_time BETWEEN p.started_at AND coalesce(p.ended_at,now())) AND ` + visibleMessage + `) END FROM room_replays p WHERE p.room_slug=$1`
 
 func scanReplay(row pgx.CollectableRow) (replayView, error) {
 	var v replayView
@@ -232,6 +262,7 @@ func (h *ChatHandler) deleteReplay(w http.ResponseWriter, r *http.Request, id in
 			dbError(w, err)
 			return
 		}
+		h.videos.Invalidate(id)
 		db := h.db()
 		if db == nil {
 			w.WriteHeader(503)
@@ -264,6 +295,8 @@ func (h *ChatHandler) deleteReplay(w http.ResponseWriter, r *http.Request, id in
 }
 
 type timelineItem struct {
+	Color   string    `json:"color"`
+	Mode    string    `json:"mode"`
 	ID      int64     `json:"id"`
 	Event   string    `json:"event_id"`
 	User    string    `json:"user_id"`
@@ -275,7 +308,7 @@ type timelineItem struct {
 
 func scanItem(row pgx.Row) (timelineItem, error) {
 	var v timelineItem
-	err := row.Scan(&v.ID, &v.Event, &v.User, &v.Name, &v.Content, &v.Offset, &v.Created)
+	err := row.Scan(&v.ID, &v.Event, &v.User, &v.Name, &v.Content, &v.Offset, &v.Created, &v.Color, &v.Mode)
 	return v, err
 }
 func (h *ChatHandler) timeline(w http.ResponseWriter, r *http.Request) {
@@ -296,13 +329,15 @@ func (h *ChatHandler) timeline(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var in struct {
+			Color   string `json:"color"`
+			Mode    string `json:"mode"`
 			Content string `json:"content"`
 			Offset  *int64 `json:"video_offset_ms"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
-		if in.Offset == nil || *in.Offset < 0 || !validText(in.Content, 1, 500) {
+		if !protocol.ValidStyle(in.Color, in.Mode) || in.Offset == nil || *in.Offset < 0 || !validText(in.Content, 1, 500) {
 			w.WriteHeader(400)
 			return
 		}
@@ -311,10 +346,10 @@ func (h *ChatHandler) timeline(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(400)
 			return
 		}
-		v, err := scanItem(db.QueryRow(ctx, `INSERT INTO danmaku_messages(room_id,event_id,user_id,nickname,content,video_offset_ms,send_time)
- SELECT p.room_id,$3,$4::text::numeric,u.nickname,$5,$6,now() FROM room_replays p JOIN users u ON u.id=$4::text::numeric
- WHERE p.room_slug=$1 AND p.id=$2 AND p.status='ready' AND p.duration_ms >= $6::bigint-5000 FOR SHARE OF p
- RETURNING id,event_id,user_id::text,nickname,content,video_offset_ms,send_time`, slug, id, rand.Text(), strconv.FormatUint(login.UserID, 10), content, *in.Offset))
+		v, err := scanItem(db.QueryRow(ctx, `INSERT INTO danmaku_messages(room_id,event_id,user_id,nickname,content,video_offset_ms,send_time,color,mode)
+ SELECT p.room_id,$3,$4::text::numeric,u.nickname,$5,$6,now(),coalesce(nullif($7,''),'#ffffff'),coalesce(nullif($8,''),'scroll') FROM room_replays p JOIN users u ON u.id=$4::text::numeric
+ WHERE p.room_slug=$1 AND p.id=$2 AND p.status='ready' AND p.duration_ms >= $6::bigint-5000 FOR UPDATE OF p
+ RETURNING id,event_id,user_id::text,nickname,content,video_offset_ms,send_time,color,mode`, slug, id, rand.Text(), strconv.FormatUint(login.UserID, 10), content, *in.Offset, in.Color, in.Mode))
 		if errors.Is(err, pgx.ErrNoRows) {
 			w.WriteHeader(400)
 			return
@@ -344,10 +379,18 @@ func (h *ChatHandler) timeline(w http.ResponseWriter, r *http.Request) {
 		dbError(w, err)
 		return
 	}
-	rows, err := db.Query(ctx, `SELECT id,coalesce(event_id,''),user_id::text,nickname,content,off,send_time FROM (
- SELECT id,event_id,user_id,nickname,content,video_offset_ms AS off,send_time FROM danmaku_messages m WHERE room_id=$1 AND video_offset_ms IS NOT NULL AND `+visibleMessage+`
- UNION ALL SELECT id,event_id,user_id,nickname,content,floor(extract(epoch FROM (send_time-$2::timestamptz))*1000)::bigint,send_time FROM danmaku_messages m WHERE room_id=$1 AND video_offset_ms IS NULL AND send_time BETWEEN $2 AND $3 AND `+visibleMessage+`
- ) timeline WHERE off >= $4 AND off < $5 AND (off,id)>($6,$7) ORDER BY off,id LIMIT $8`, room, start, end, from, to, offset, after, limit+1)
+	// Legacy messages already lie inside the session interval. Clamp large
+	// caller offsets before converting milliseconds to a Go duration.
+	boundary := func(ms int64) time.Time {
+		if ms > end.Sub(start).Milliseconds() {
+			return end.Add(time.Millisecond)
+		}
+		return start.Add(time.Duration(ms) * time.Millisecond)
+	}
+	rows, err := db.Query(ctx, `SELECT id,coalesce(event_id,''),user_id::text,nickname,content,off,send_time,color,mode FROM (
+ SELECT id,event_id,user_id,nickname,content,video_offset_ms AS off,send_time,color,mode FROM danmaku_messages m WHERE room_id=$1 AND video_offset_ms >= $4 AND video_offset_ms < $5 AND (video_offset_ms,id)>($6,$7) AND `+visibleMessage+`
+ UNION ALL SELECT id,event_id,user_id,nickname,content,floor(extract(epoch FROM (send_time-$2::timestamptz))*1000)::bigint,send_time,color,mode FROM danmaku_messages m WHERE room_id=$1 AND video_offset_ms IS NULL AND send_time BETWEEN $2 AND $3 AND send_time >= $9 AND send_time < $10 AND `+visibleMessage+`
+ ) timeline WHERE off >= $4 AND off < $5 AND (off,id)>($6,$7) ORDER BY off,id LIMIT $8`, room, start, end, from, to, offset, after, limit+1, boundary(from), boundary(to))
 	if err != nil {
 		dbError(w, err)
 		return
@@ -364,4 +407,39 @@ func (h *ChatHandler) timeline(w http.ResponseWriter, r *http.Request) {
 		last = items[limit-1]
 	}
 	writeJSON(w, map[string]any{"items": items, "has_more": more, "next_offset_ms": last.Offset, "next_after_id": last.ID})
+}
+
+func (h *ChatHandler) density(w http.ResponseWriter, r *http.Request) {
+	id, ok := replayID(w, r)
+	if !ok {
+		return
+	}
+	n, ok := number(r, "buckets", 60)
+	if !ok || n < 10 || n > 120 {
+		w.WriteHeader(400)
+		return
+	}
+	db := h.db()
+	if db == nil {
+		w.WriteHeader(503)
+		return
+	}
+	var duration, width int64
+	var counts []int64
+	err := db.QueryRow(r.Context(), `WITH replay AS (
+ SELECT *,greatest(1,ceil(duration_ms::numeric/$3)::bigint) width FROM room_replays WHERE room_slug=$1 AND id=$2
+ ), totals AS (
+ SELECT least($3::bigint-1,coalesce(m.video_offset_ms,floor(extract(epoch FROM (m.send_time-p.started_at))*1000)::bigint)/p.width) bucket,count(*) n
+ FROM replay p JOIN danmaku_messages m ON m.room_id=p.room_id
+ WHERE (m.video_offset_ms IS NOT NULL OR m.send_time BETWEEN p.started_at AND coalesce(p.ended_at,now())) AND `+visibleMessage+` GROUP BY 1
+ ) SELECT duration_ms,width,ARRAY(SELECT coalesce(n,0) FROM generate_series(0,$3::bigint-1) i LEFT JOIN totals ON bucket=i ORDER BY i) FROM replay`, r.PathValue("room"), id, n).Scan(&duration, &width, &counts)
+	if err != nil {
+		dbError(w, err)
+		return
+	}
+	var peak int64
+	for _, count := range counts {
+		peak = max(peak, count)
+	}
+	writeJSON(w, map[string]any{"duration_ms": duration, "bucket_ms": width, "buckets": counts, "max_count": peak})
 }

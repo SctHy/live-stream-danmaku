@@ -53,6 +53,10 @@ func (h *ChatHandler) businessRoutes(mux *http.ServeMux) {
 		"GET /api/replays/{id}/video":                 h.video,
 		"GET /api/rooms/{room}/replays/{id}/danmaku":  h.timeline,
 		"POST /api/rooms/{room}/replays/{id}/danmaku": h.timeline,
+		"GET /api/rooms/{room}/replays/{id}/density":  h.density,
+		"POST /api/rooms/{room}/follow":               h.follow,
+		"DELETE /api/rooms/{room}/follow":             h.follow,
+		"GET /api/me/following":                       h.following,
 		"GET /api/me/preferences":                     h.preferences, "GET /api/plaza/strategies": h.strategies,
 		"GET /api/rooms": h.square, "GET /api/gifts/catalog": h.giftCatalog,
 		"GET /api/wallet/recharge-packages":              h.packages,
@@ -274,6 +278,7 @@ func (h *ChatHandler) me(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(503)
 			return
 		}
+
 	} else if db == nil || db.QueryRow(r.Context(), "SELECT balance,nickname FROM users WHERE id=$1", v.UserID).Scan(&bal, &v.Nickname) != nil {
 		writeJSON(w, accountView{v, true, nil})
 		return

@@ -71,6 +71,7 @@ func walletLedger(ctx context.Context, db querier, uid uint64) ([]LedgerEntry, e
 }
 
 type WalletSnapshot struct {
+	Earnings  int64         `json:"earnings"`
 	Balance   int64         `json:"balance"`
 	Checked   bool          `json:"checked_in_today"`
 	Orders    []GiftOrder   `json:"orders"`
@@ -80,7 +81,7 @@ type WalletSnapshot struct {
 
 func ReadWallet(ctx context.Context, db *pgxpool.Pool, uid uint64) (wallet WalletSnapshot, err error) {
 	err = pgx.BeginTxFunc(ctx, db, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, "SELECT balance,EXISTS(SELECT FROM daily_checkins WHERE user_id=$1 AND claim_date=CURRENT_DATE) FROM users WHERE id=$1", uid).Scan(&wallet.Balance, &wallet.Checked)
+		err := tx.QueryRow(ctx, "SELECT earnings,balance,EXISTS(SELECT FROM daily_checkins WHERE user_id=$1 AND claim_date=CURRENT_DATE) FROM users WHERE id=$1", uid).Scan(&wallet.Earnings, &wallet.Balance, &wallet.Checked)
 		if err != nil {
 			return err
 		}

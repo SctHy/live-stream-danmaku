@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -17,17 +18,21 @@ type OBSStream struct {
 }
 
 func (s *Store) OBS(ctx context.Context, room string) (OBSStream, error) {
-	var v OBSStream
-	raw, err := s.r.Get(ctx, sessionPrefix(room)+"obs").Bytes()
-	if errors.Is(err, redis.Nil) {
-		return v, nil
-	}
-	if err == nil {
-		err = json.Unmarshal(raw, &v)
-	}
-	return v, err
+	return s.obs.Load(room, 2*time.Second, func() (OBSStream, error) {
+		var v OBSStream
+		raw, err := s.r.Get(ctx, sessionPrefix(room)+"obs").Bytes()
+		if errors.Is(err, redis.Nil) {
+			return v, nil
+		}
+		if err == nil {
+			err = json.Unmarshal(raw, &v)
+		}
+		return v, err
+	})
 }
+func (s *Store) InvalidateOBS(room string) { s.obs.Invalidate(room) }
 func (s *Store) SetOBS(ctx context.Context, room string, v OBSStream) error {
+	defer s.obs.Invalidate(room)
 	key := sessionPrefix(room) + "obs"
 	if v.ReplayID == 0 {
 		return s.r.Del(ctx, key).Err()

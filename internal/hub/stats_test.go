@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/scthy/maku/internal/protocol"
+	"github.com/scthy/maku/internal/pubsub"
 )
 
 type partialStatsStore struct {
@@ -30,5 +32,33 @@ func TestStatsRequeuesUnconfirmedLikes(t *testing.T) {
 	h.broadcastStats()
 	if len(h.localLikes) != 1 || h.localLikes["pending"] != 4 {
 		t.Fatal(h.localLikes)
+	}
+}
+
+type heatRecorder struct {
+	roomStore
+	batches [][]pubsub.HeatBatch
+}
+
+func (s *heatRecorder) FlushHeat(_ context.Context, b []pubsub.HeatBatch) error {
+	s.batches = append(s.batches, slices.Clone(b))
+	if len(s.batches) == 1 {
+		return errors.New("lost acknowledgement")
+	}
+	return nil
+}
+func TestFlushHeatRetriesSameBatch(t *testing.T) {
+	s := new(heatRecorder)
+	minute := time.Now().Unix() / 60
+	h := Hub{log: slog.New(slog.DiscardHandler), store: s, localHeat: map[int64]map[string]uint64{minute: {"room": 3}}}
+	h.flushHeat(t.Context())
+	h.localHeat[minute] = map[string]uint64{"room": 2}
+	h.flushHeat(t.Context())
+	if len(h.pendingHeat) != 0 || len(s.batches) != 2 || len(s.batches[1]) != 2 {
+		t.Fatal(s.batches)
+	}
+	old, next := s.batches[1][0], s.batches[1][1]
+	if old.ID != s.batches[0][0].ID || old.Rooms["room"] != 3 || next.ID == old.ID || next.Rooms["room"] != 2 {
+		t.Fatal(s.batches)
 	}
 }
