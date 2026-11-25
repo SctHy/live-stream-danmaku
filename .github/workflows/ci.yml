@@ -27,7 +27,25 @@ jobs:
       - run: go test -race -count=1 ./...
       - run: go build ./cmd/gateway ./cmd/archiver ./cmd/bench
 
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Type-check and build frontend
+        working-directory: frontend
+        run: npm ci && npx tsc --noEmit && npm run build
+      - name: Verify embedded assets
+        run: |
+          git diff --exit-code -- internal/httpapi/web
+          test -z "$(git ls-files --others --exclude-standard -- internal/httpapi/web)"
+
   integration:
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     services:
       redis:
@@ -56,4 +74,4 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test -race -count=1 -v ./...
+      - run: go test -race -count=1 -timeout=15m -v ./...

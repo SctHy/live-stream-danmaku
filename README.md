@@ -1,6 +1,6 @@
 # Maku
 
-Maku 是一个分布式实时弹幕系统，拆分为两个独立服务：**Gateway（网关）** 负责 WebSocket 实时广播和断线补发，**Archiver（归档服务）** 负责从 Kafka 消费弹幕并批量写入 PostgreSQL。这样可以把“在线观众收到弹幕的速度”和“历史数据写数据库的耗时”拆开，互相不拖慢。
+Maku 是一个分布式实时弹幕系统。观众可以从直播广场进入房间，发送弹幕、签到送礼或发布醒目留言。主播可以创建房间、分配房管、检索历史并查看场次数据。Gateway 提供实时广播、断线补发和业务 API，Archiver 独立消费 Kafka 消息并批量归档到 PostgreSQL。
 
 HTTP 路由和日志直接使用 Go 标准库 `net/http.ServeMux` 和 `log/slog`。整个 Go 项目只引入 5 个核心第三方库：`gorilla/websocket`、`go-redis/v9`、`franz-go`、`pgx/v5`、`prometheus/client_golang`。
 
@@ -22,7 +22,8 @@ flowchart LR
     G -->|异步投递新弹幕| K[Kafka]
     K -->|按分区批量消费| A[Archiver 归档服务]
     A -->|UNNEST 批量写入| P[(PostgreSQL)]
-    G -->|查询历史弹幕 · 游标分页| P
+    G -->|账号与房间权限 · 钱包与订单 · 历史检索| P
+    G -->|广场分钟桶 · 场次贡献榜| Z[(Redis ZSET)]
     B -->|获取直播流地址| G
     G -->|请求直播源| U[B 站直播 API]
     W[B 站弹幕 WebSocket] -->|同直播间共享连接| LB[internal/livebridge]
@@ -40,9 +41,16 @@ flowchart LR
 6. **区分实时回执、历史归档和计数统计。** 新弹幕的 `accepted` 表示 Redis 已写入恢复流并发布广播，重复提交返回原事件 ID。此回执只确认实时接收，Kafka 异步投递在队列满、投递失败或进程崩溃时可能丢失，历史记录因此可能缺项。在线人数定期汇总，点赞数为近似最终一致统计，网关崩溃可能丢失未同步的增量，Redis 已执行但应答丢失时重试可能重复计数。
 7. **按直播间共享 B 站实时弹幕连接。** 网关通过 `internal/livebridge` 缓存 B 站签名密钥和 `buvid3`，同一数字直播间只维持一条上游 WebSocket 连接，所有观众共享，最后一位观众离开后自动断开。解析时限制 zlib 解压后的最大体积防内存撑爆；B 站弹幕以消息类型 `108` 实时下发，仅用于页面展示，不计入本地恢复游标，也不写入 Kafka 和 PostgreSQL。
 
+8. **账号与多房间授权。** Redis 保存登录会话，PostgreSQL 按房间区分房主、房管和观众。房主任免房管，房主与房管可撤回弹幕、禁言和更新公告。Redis Lua 在接收弹幕时统一执行全员禁言和慢速模式，跨网关生效。
+9. **直播广场。** Redis 按分钟写入热度 ZSET，合并最近 10 个分钟桶生成滚动热榜。网关分别缓存排序索引与房间详情，只批量补取缺失的详情，用 singleflight 合并同键并发回源。
+10. **虚拟积分与礼物。** 每日签到可领取积分。礼物与醒目留言在同一个 PostgreSQL 事务内创建订单、校验余额并条件扣款，以 `(sender_id, client_order_id)` 唯一约束防止重试重复扣款。订单投递后更新场次贡献榜，醒目留言按礼物档位限时置顶。
+11. **场次看板与历史检索。** 看板汇总当前及峰值在线、已归档弹幕、发言人数、撤回、管控和礼物数据。历史查询可组合关键词、发言人和 `before_id` 游标，翻页时继续过滤撤回记录。
+
+**PostgreSQL 离线时**，只要 Redis 正常且网关未停机，实时弹幕、断线补发和 `/readyz` 仍可用。广场回退到 Redis 中的活跃房间，已有登录会话可读取身份（余额缺省），礼物目录和已有贡献榜仍可读取。注册、登录、修改资料、房间资料与授权、钱包签到与礼物订单、历史检索、审计和场次看板等依赖数据库的读写返回 503。配置的旧版房管密钥仍可禁言和解禁单个用户。数据库重连成功后，网关自动恢复业务。
+
 ## 性能测试结果
 
-基线采于 2026-11-25T12:00:15.613601Z，`git_sha: f29748d9ed7acba06cfe1b4942daceabb9f572f9`，`dirty: false`。环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。`full` 模式下每组预热后测量 5 轮，表中为中位数。
+以下是核心引擎提交 `f29748d` 的实测数据，未覆盖后续账号、广场、礼物和看板接口。基线采于 2026-11-25T12:00:15.613601Z，`git_sha: f29748d9ed7acba06cfe1b4942daceabb9f572f9`，`dirty: false`。环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。`full` 模式下每组预热后测量 5 轮，表中为中位数。
 
 | 实验与负载 | 对照组 → 处理组 | 指标 | 对照中位数 | 处理中位数 | Gate |
 | --- | --- | --- | ---: | ---: | --- |
@@ -82,10 +90,25 @@ make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/session` | 创建或复用访客身份，返回 `user_id`，并通过 HttpOnly Cookie 保存会话 |
-| GET / WS | `/api/rooms/{room}/{session}/live` | WebSocket 实时通道：发送弹幕与点赞，接收广播、统计和发送回执；支持 `?migrate=1` 迁移与 `danmaku.batch.v1` 批量协议 |
+| POST | `/api/auth/register`、`/api/auth/login`、`/api/auth/logout` | 注册、登录或退出账号，登录态由 Cookie 保存 |
+| GET / PATCH | `/api/auth/me` | 读取当前身份，或修改已登录账号的昵称 |
+| GET | `/api/rooms` | 广场排序 `sort=hot/online/latest`，过滤 `status=all/live`，`limit` 默认 20，上限 50 |
+| POST | `/api/rooms` | 登录后提交 `slug`、`title` 建房，可附简介及 B 站房号 |
+| GET / PATCH | `/api/rooms/{room}` | 查询资料与当前角色；房主可更新资料、当前场次、直播状态和管控设置 |
+| GET / POST | `/api/rooms/{room}/moderators` | 房主或房管查看名单；房主按用户名或用户 ID 任命 |
+| DELETE | `/api/rooms/{room}/moderators/{user_id}` | 房主解除任命 |
+| GET | `/api/rooms/{room}/{session}/mutes` | 查看本场次禁言名单 |
+| GET | `/api/rooms/{room}/{session}/audits` | 按房间查询审计记录，支持 `before_id`、`limit` |
+| GET | `/api/gifts/catalog` | 礼物编码、价格与醒目留言置顶时长 |
+| GET | `/api/wallet` | 查询余额、今日签到状态和近期订单 |
+| POST | `/api/wallet/checkin` | 每日签到，重复领取不增加余额 |
+| GET / POST | `/api/rooms/{room}/{session}/gifts` | 按 `limit` 查近期礼物与有效置顶；下单传 `client_order_id`、`gift_code`、`quantity` 和可选留言 `message`（醒目留言必填） |
+| GET | `/api/rooms/{room}/{session}/leaderboard` | 查询本场贡献榜前 20 名 |
+| GET | `/api/rooms/{room}/{session}/analytics` | 房主或房管查看场次看板 |
+| GET / WS | `/api/rooms/{room}/{session}/live` | WebSocket 实时通道：发送弹幕与点赞，接收弹幕、礼物、房间管控变更、统计和发送回执；支持 `?migrate=1` 迁移与 `danmaku.batch.v1` 批量协议 |
 | GET | `/api/rooms/{room}/{session}/recent` | 传入 `after`（消息游标），补发断线期间漏掉的弹幕，返回 `events`、`pos`、`reset` |
-| GET | `/api/rooms/{room}/{session}/history` | 按 ID 倒序查历史弹幕，`limit` 默认 50（上限 100），翻页传 `before_id=next_before_id` |
-| POST | `/api/rooms/{room}/{session}/moderate` | 房管操作（校验同源、房间权限和 Bearer 密钥）：按 `event_id` 撤回弹幕，或按 `user_id` 禁言指定秒数 |
+| GET | `/api/rooms/{room}/{session}/history` | 按关键词 `q` 和发言人 `user_id` 可选过滤，按 ID 倒序查历史弹幕，`limit` 默认 50（上限 100），翻页传 `before_id=next_before_id` |
+| POST | `/api/rooms/{room}/{session}/moderate` | 同源请求，按房间角色或配置的 Bearer 密钥授权。`action` 支持 `withdraw`（event_id）、`mute/unmute`（user_id，禁言另传 seconds）、`mute_all`（enabled）、`slow_mode`（seconds，0 关闭）、`notice`（notice） |
 | GET | `/api/live/playurl?room_id=6` | 查询 B 站数字直播间开播状态与可用播放地址 |
 | GET | `/livez` | 进程存活检查（Gateway 与 Archiver 均提供） |
 | GET | `/readyz` | 服务就绪检查（Gateway 只检查停机状态与 Redis。PostgreSQL 离线时 Gateway 仍可启动并提供实时服务，历史查询和撤回返回 503，后台重连成功后自动恢复。Archiver 仍检查 PostgreSQL；未就绪返回 503） |
@@ -101,14 +124,14 @@ maku/
 │   └── bench/          # 广播压测、冷热房间隔离、双网关迁移、阶梯容量与稳态压测工具
 ├── internal/
 │   ├── filter/         # Aho-Corasick 敏感词过滤与词库热更新
-│   ├── httpapi/        # HTTP/WebSocket 路由、访客会话、直播源解析与内嵌前端静态文件
+│   ├── httpapi/        # HTTP/WebSocket、账号权限、广场缓存、礼物与看板、内嵌前端
 │   ├── hub/            # 房间连接管理、分片广播、批量合并发送、慢连接保护与平滑迁移
 │   ├── livebridge/     # B 站实时弹幕鉴权、共享连接与二进制帧解析
 │   ├── metrics/        # Prometheus 监控指标定义
 │   ├── mq/             # Kafka 生产者与批量消费者（含退避重试）
 │   ├── protocol/       # WebSocket 消息格式与子协议常量
-│   ├── pubsub/         # Redis Lua 脚本、共享订阅管理与在线人数/点赞统计
-│   └── store/          # PostgreSQL 连接池、内嵌 SQL 迁移与 UNNEST 批量写库
+│   ├── pubsub/         # Redis Lua 管控、共享订阅、热度分钟桶与场次贡献榜
+│   └── store/          # PostgreSQL 迁移、归档与检索、房间授权、钱包及订单事务
 ├── frontend/           # 纯 TypeScript 前端（不依赖 React/Vue，仅引入 mpegts.js / hls.js）
 ├── Dockerfile          # 构建网关与归档服务镜像
 ├── deploy/             # Nginx 负载均衡与 Prometheus 采集配置
@@ -129,7 +152,13 @@ make run-archiver    # 终端 1：启动归档服务
 make run-gateway     # 终端 2：启动弹幕网关
 ```
 
-浏览器打开 `http://127.0.0.1:8080/`，用两个标签页进入同一个房间和场次即可实时互发弹幕。输入数字房间号（如 `6`）会自动拉取 B 站直播画面与实时弹幕，可通过播放器下方的「B 站弹幕」开关控制显隐。如果修改了前端源码，重新构建并重启网关即可生效：
+浏览器打开 `http://127.0.0.1:8080/`，用两个标签页进入同一个房间和场次即可实时互发弹幕。输入数字房间号（如 `6`）会自动拉取 B 站直播画面与实时弹幕，可通过播放器下方的「B 站弹幕」开关控制显隐。
+
+1. 打开「直播广场」，按热度、在线人数或最新排序。注册并登录后，展开「创建直播间」，填写房间标识和标题，选择「创建并进入」。
+2. 打开「账号与钱包」签到领取积分，在房间里送礼或选择醒目留言并填写文字。可在贡献榜核对本场累计贡献。
+3. 房主打开「房管与看板」，按用户名任命房管，切换全员禁言、慢速模式或更新公告。在「禁言与审计」查看操作记录，在「场次看板」查看在线、发言和礼物统计。历史面板支持按关键词及发言人筛选。
+
+如果修改了前端源码，重新构建并重启网关即可生效：
 
 ```sh
 (cd frontend && npm ci && npm run build)
@@ -162,7 +191,7 @@ make run-gateway     # 终端 2：启动弹幕网关
 
 ## 监控与测试
 
-GitHub Actions 在 PR 或推送到 main 时检查 Go 格式，运行 vet、竞态测试并构建三个入口，另用 Redis 和 PostgreSQL 运行集成测试。[CI 配置](.github/workflows/ci.yml)
+GitHub Actions 在 PR 或推送到 main 时检查 Go 格式，运行 vet、竞态测试并构建三个入口，使用 Redis 和 PostgreSQL 对全部 Go 包运行集成测试。独立前端任务通过 Node 24 LTS 安装锁定依赖、执行 TypeScript 类型检查与构建，并检查内嵌目录的变更及新增文件。[CI 配置](.github/workflows/ci.yml)
 
 网关暴露活跃连接数、活跃房间数、单条与批量发送帧数、分片排队耗时、队列丢弃数、慢连接断开数、拦截数及 Kafka 投递失败数；归档服务暴露写入行数、批写耗时与死信数。所有指标标签均使用固定枚举值，避免标签数量无限增长。
 
