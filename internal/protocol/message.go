@@ -16,6 +16,7 @@ const (
 	TypeReady       = 106
 	TypeMigrate     = 107
 	TypeLiveDanmaku = 108
+	TypeRoomState   = 109
 )
 
 // WsPacket carries a typed payload and optional recovery cursors.
@@ -29,6 +30,7 @@ type WsPacket struct {
 
 // DanmakuMessage is a persisted event and the WebSocket chat payload.
 type DanmakuMessage struct {
+	Nickname    string    `json:"nickname,omitempty"`
 	ClientMsgID string    `json:"client_msg_id,omitempty"`
 	EventID     string    `json:"event_id,omitempty"`
 	ID          uint64    `json:"id"`
@@ -41,6 +43,7 @@ type DanmakuMessage struct {
 // FitsHistory checks the PostgreSQL text limits before publishing or batching.
 func (d DanmakuMessage) FitsHistory() bool {
 	return utf8.RuneCountInString(d.RoomID) <= 50 && utf8.RuneCountInString(d.Content) <= 500 &&
+		utf8.RuneCountInString(d.Nickname) <= 24 && !strings.ContainsRune(d.Nickname, 0) &&
 		!strings.ContainsRune(d.RoomID, 0) && !strings.ContainsRune(d.Content, 0) && !strings.ContainsRune(d.EventID, 0)
 }
 
@@ -75,4 +78,12 @@ type Withdraw struct {
 }
 type ClockReady struct {
 	ServerTimeMS int64 `json:"server_time_ms"`
+}
+
+// RoomControls is the room-state event payload shared by storage and live delivery.
+type RoomControls struct {
+	Notice  string `json:"notice"`
+	Status  string `json:"status"`
+	Slow    int    `json:"slow_mode_seconds"`
+	MuteAll bool   `json:"mute_all"`
 }

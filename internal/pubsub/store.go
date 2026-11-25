@@ -2,7 +2,6 @@ package pubsub
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -34,9 +33,6 @@ func (s *Store) Guest(ctx context.Context, token string) (uint64, error) {
 }
 func (s *Store) SaveGuest(ctx context.Context, token string, uid uint64, ttl time.Duration) error {
 	return s.r.Set(ctx, "dm:guest:"+token, uid, ttl).Err()
-}
-func (s *Store) Mute(ctx context.Context, room string, uid uint64, ttl time.Duration) error {
-	return s.r.Set(ctx, fmt.Sprintf("dm:{%s}:mute:%d", room, uid), 1, ttl).Err()
 }
 func (s *Store) Mux(ctx context.Context, n int) *Mux { return NewMux(ctx, s.r, n) }
 

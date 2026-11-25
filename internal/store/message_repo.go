@@ -30,6 +30,7 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 	rooms := make([]string, len(msgs))
 	users := make([]string, len(msgs))
 	contents := make([]string, len(msgs))
+	names := make([]string, len(msgs))
 	times := make([]time.Time, len(msgs))
 	for i, msg := range msgs {
 		ids[i] = msg.EventID
@@ -37,13 +38,14 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 		// NUMERIC(20,0) also accepts user IDs above PostgreSQL's signed BIGINT range.
 		users[i] = strconv.FormatUint(msg.UserID, 10)
 		contents[i] = msg.Content
+		names[i] = msg.Nickname
 		times[i] = msg.SendTime
 	}
-	tag, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time)
- SELECT id, room, uid::numeric, body, sent
- FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[])
- AS batch(id, room, uid, body, sent)
- ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times)
+	tag, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time,nickname)
+ SELECT id, room, uid::numeric, body, sent,nickname
+ FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[],$6::text[])
+ AS batch(id, room, uid, body, sent,nickname)
+ ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times, names)
 	return tag.RowsAffected(), err
 }
 
@@ -61,7 +63,7 @@ func (r *MessageRepo) ListHistory(ctx context.Context, room string, beforeID uin
 	if beforeID > math.MaxInt64 {
 		beforeID = 0
 	}
-	rows, err := r.db.Query(ctx, `SELECT m.id,coalesce(m.event_id,''),m.room_id,m.user_id::text,m.content,m.send_time
+	rows, err := r.db.Query(ctx, `SELECT m.id,coalesce(m.event_id,''),m.room_id,m.user_id::text,m.content,m.send_time,m.nickname
  FROM danmaku_messages m WHERE m.room_id=$1 AND ($2::bigint=0 OR m.id<$2)
  AND NOT EXISTS (SELECT 1 FROM danmaku_withdrawals w WHERE w.room_id=m.room_id AND w.event_id=m.event_id)
  ORDER BY m.id DESC LIMIT $3`, room, int64(beforeID), limit+1)
@@ -73,7 +75,7 @@ func (r *MessageRepo) ListHistory(ctx context.Context, room string, beforeID uin
 	for rows.Next() {
 		var m protocol.DanmakuMessage
 		var uid string
-		if err := rows.Scan(&m.ID, &m.EventID, &m.RoomID, &uid, &m.Content, &m.SendTime); err != nil {
+		if err := rows.Scan(&m.ID, &m.EventID, &m.RoomID, &uid, &m.Content, &m.SendTime, &m.Nickname); err != nil {
 			return nil, false, err
 		}
 		m.UserID, err = strconv.ParseUint(uid, 10, 64)

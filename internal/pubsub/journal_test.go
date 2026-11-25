@@ -23,7 +23,7 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	room := "check/" + rand.Text()
-	key := "dm:{" + room + "}:recent"
+	key := sessionPrefix(room) + "recent"
 	defer r.Del(ctx, key)
 	publish := func(kind int, id string) {
 		t.Helper()

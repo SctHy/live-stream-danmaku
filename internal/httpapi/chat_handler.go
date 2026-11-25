@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -33,11 +32,19 @@ type HistoryStore interface {
 	Withdraw(context.Context, string, string) error
 }
 type sessionStore interface {
+	Login(context.Context, string) (pubsub.Login, error)
+	SaveLogin(context.Context, string, pubsub.Login, time.Duration) error
+	Logout(context.Context, string) error
+	SetControls(context.Context, string, protocol.RoomControls) error
+	SetStaff(context.Context, string, uint64, bool) error
+	Mutes(context.Context, string) ([]pubsub.MuteRecord, error)
 	Guest(context.Context, string) (uint64, error)
 	SaveGuest(context.Context, string, uint64, time.Duration) error
 	Mute(context.Context, string, uint64, time.Duration) error
 	Recover(context.Context, string, string) (pubsub.Recovery, error)
 	Journal(context.Context, string, []byte) error
+	JournalOnce(context.Context, string, []byte, int64) error
+	RefreshLogin(context.Context, string, pubsub.Login) error
 }
 type ChatHandler struct {
 	history  HistoryStore
@@ -58,9 +65,9 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /assets/protocol.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d, liveDanmaku=%d;\n",
+		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d, liveDanmaku=%d, roomState=%d;\n",
 			protocol.TypeDanmaku, protocol.TypeStats, protocol.TypeLike, protocol.TypeReceipt,
-			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate, protocol.TypeLiveDanmaku)
+			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate, protocol.TypeLiveDanmaku, protocol.TypeRoomState)
 	})
 	mux.Handle("GET /assets/", http.FileServerFS(web))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +77,7 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/live/playurl", newLiveResolver("https://api.live.bilibili.com", nil).serve)
 	mux.HandleFunc("POST /api/session", h.session)
-	slug := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,24}$`)
+	h.businessRoutes(mux)
 	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/rooms/{room}/{session}/history": h.listHistory, "GET /api/rooms/{room}/{session}/live": h.live, "GET /api/rooms/{room}/{session}/recent": h.recent, "POST /api/rooms/{room}/{session}/moderate": h.moderate} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			if !slug.MatchString(r.PathValue("room")) || !slug.MatchString(r.PathValue("session")) {
@@ -111,32 +118,24 @@ func sameOrigin(r *http.Request) bool {
 	u, err := url.Parse(origin)
 	return err == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "http" || u.Scheme == "https")
 }
-func (h *ChatHandler) identity(r *http.Request) (uint64, error) {
+func (h *ChatHandler) guest(r *http.Request) (uint64, error) {
 	cookie, err := r.Cookie("danmaku_guest")
 	if err != nil || len(cookie.Value) < 26 || len(cookie.Value) > 80 {
 		return 0, redis.Nil
 	}
-	return h.sessions.Guest(r.Context(), cookie.Value)
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	return h.sessions.Guest(ctx, cookie.Value)
 }
 func (h *ChatHandler) session(w http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
 		w.WriteHeader(403)
 		return
 	}
-	uid, err := h.identity(r)
+	login, err := h.loginIdentity(r)
+	uid := login.UserID
 	if err == redis.Nil {
-		n, e := rand.Int(rand.Reader, big.NewInt(1<<52))
-		if e != nil {
-			w.WriteHeader(503)
-			return
-		}
-		uid = n.Uint64() + 1
-		token := rand.Text()
-		ttl := 24 * time.Hour
-		err = h.sessions.SaveGuest(r.Context(), token, uid, ttl)
-		if err == nil {
-			http.SetCookie(w, &http.Cookie{Name: "danmaku_guest", Value: token, Path: "/", MaxAge: int(ttl.Seconds()), HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
-		}
+		uid, err = h.ensureGuest(w, r)
 	}
 	if err != nil {
 		w.WriteHeader(503)
@@ -145,8 +144,31 @@ func (h *ChatHandler) session(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, map[string]any{"user_id": uid})
 }
+func (h *ChatHandler) ensureGuest(w http.ResponseWriter, r *http.Request) (uint64, error) {
+	uid, err := h.guest(r)
+	if err == redis.Nil {
+		n, e := rand.Int(rand.Reader, big.NewInt(1<<52))
+		if e != nil {
+			return 0, e
+		}
+		uid = n.Uint64() + 1
+		token := rand.Text()
+		ttl := 24 * time.Hour
+		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+		defer cancel()
+		err = h.sessions.SaveGuest(ctx, token, uid, ttl)
+		if err == nil {
+			http.SetCookie(w, &http.Cookie{Name: "danmaku_guest", Value: token, Path: "/", MaxAge: int(ttl.Seconds()), HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
+		}
+	}
+	return uid, err
+}
 func (h *ChatHandler) live(w http.ResponseWriter, r *http.Request) {
-	uid, err := h.identity(r)
+	login, err := h.loginIdentity(r)
+	uid := login.UserID
+	if err == redis.Nil {
+		uid, err = h.guest(r)
+	}
 	if err == redis.Nil && h.allowDev && loopback(r.RemoteAddr) && r.Header.Get("Origin") == "" {
 		uid, err = strconv.ParseUint(r.URL.Query().Get("uid"), 10, 64)
 	}
@@ -154,10 +176,10 @@ func (h *ChatHandler) live(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
 		return
 	}
-	h.connect(w, r, uid, roomID(r))
+	h.connect(w, r, uid, roomID(r), login.Nickname)
 }
 
-func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64, room string) {
+func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64, room, nickname string) {
 	if h.manager.Retiring() {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -168,6 +190,14 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 		return
 	}
 	client := h.manager.NewClient(uid, room, conn)
+	if nickname != "" {
+		cookie, _ := r.Cookie(loginCookie)
+		token := cookie.Value
+		client.LoginNickname = func(ctx context.Context) (string, error) {
+			v, err := h.sessions.Login(ctx, token)
+			return v.Nickname, err
+		}
+	}
 
 	if r.URL.Query().Get("migrate") == "1" {
 		client.EnableMigration()

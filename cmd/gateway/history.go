@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/scthy/maku/internal/httpapi"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/store"
@@ -16,6 +17,7 @@ var errHistoryUnavailable = errors.New("history database unavailable")
 
 type historyPool struct {
 	httpapi.HistoryStore
+	db     *pgxpool.Pool
 	close  func()
 	failed chan struct{}
 }
@@ -25,7 +27,7 @@ func openHistory(ctx context.Context) (*historyPool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &historyPool{HistoryStore: store.NewMessageRepo(db), close: db.Close}, nil
+	return &historyPool{db: db, HistoryStore: store.NewMessageRepo(db), close: db.Close}, nil
 }
 
 type gatewayHistory struct {
@@ -97,4 +99,11 @@ func (h *gatewayHistory) Withdraw(ctx context.Context, room, id string) error {
 	err := p.Withdraw(op, room, id)
 	h.invalidate(p, ctx, err)
 	return err
+}
+
+func (h *gatewayHistory) BusinessDB() *pgxpool.Pool {
+	if p := h.current.Load(); p != nil {
+		return p.db
+	}
+	return nil
 }

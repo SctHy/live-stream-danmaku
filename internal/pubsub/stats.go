@@ -37,7 +37,7 @@ func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[stri
 		counts[room] = p.Get(ctx, key)
 		optional[counts[room]] = true
 		if strings.Contains(room, "/") {
-			tails[room] = p.XRevRangeN(ctx, "dm:{"+room+"}:recent", "+", "-", 1)
+			tails[room] = p.XRevRangeN(ctx, sessionPrefix(room)+"recent", "+", "-", 1)
 		}
 	}
 	cmds, execErr := p.Exec(ctx)

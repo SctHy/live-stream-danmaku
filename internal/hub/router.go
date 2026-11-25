@@ -45,6 +45,16 @@ func (m *Hub) permitted(c *Client, action int, id string) bool {
 }
 
 func (m *Hub) dispatch(c *Client, packet protocol.WsPacket) {
+	if c.LoginNickname != nil {
+		ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
+		name, err := c.LoginNickname(ctx)
+		cancel()
+		if err != nil {
+			c.Close()
+			return
+		}
+		c.nickname = name
+	}
 	switch packet.Type {
 	case protocol.TypeDanmaku:
 		m.handleDanmaku(c, packet.Data)
@@ -71,7 +81,7 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 			return
 		}
 	}
-	msg := protocol.DanmakuMessage{EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
+	msg := protocol.DanmakuMessage{Nickname: c.nickname, EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
 	body, err := json.Marshal(msg)
 	if err != nil {
 		m.log.Error("Encode WebSocket packet", "error", err)

@@ -28,7 +28,7 @@ func TestFitsHistory(t *testing.T) {
 	if !base.FitsHistory() {
 		t.Fatal("valid rune boundary")
 	}
-	for _, change := range []func(*DanmakuMessage){func(d *DanmakuMessage) { d.RoomID += "房" }, func(d *DanmakuMessage) { d.Content += "字" }, func(d *DanmakuMessage) { d.EventID = "a\x00" }, func(d *DanmakuMessage) { d.RoomID = "\x00" }, func(d *DanmakuMessage) { d.Content = "\x00" }} {
+	for _, change := range []func(*DanmakuMessage){func(d *DanmakuMessage) { d.Nickname = "a\x00" }, func(d *DanmakuMessage) { d.Nickname = strings.Repeat("名", 25) }, func(d *DanmakuMessage) { d.RoomID += "房" }, func(d *DanmakuMessage) { d.Content += "字" }, func(d *DanmakuMessage) { d.EventID = "a\x00" }, func(d *DanmakuMessage) { d.RoomID = "\x00" }, func(d *DanmakuMessage) { d.Content = "\x00" }} {
 		d := base
 		change(&d)
 		if d.FitsHistory() {

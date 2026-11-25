@@ -20,7 +20,7 @@ func TestSnapshotStatsPipelineErrors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	room := "stats/" + rand.Text()
-	recent := "dm:{" + room + "}:recent"
+	recent := sessionPrefix(room) + "recent"
 	likesKey := fmt.Sprintf(KeyRoomLikes, room)
 	registry := fmt.Sprintf(KeyServerOfRoom, room)
 	online := fmt.Sprintf(KeyRoomServerOnline, room, "active")

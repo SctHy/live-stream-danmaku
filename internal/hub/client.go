@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -30,7 +31,9 @@ type Client struct {
 	stats            chan *outboundFrame
 	UserID           uint64 // client id
 
-	RoomID string
+	LoginNickname func(context.Context) (string, error)
+	nickname      string
+	RoomID        string
 
 	Socket       *websocket.Conn // the websocket connection that the server holds for each client
 	batch        bool

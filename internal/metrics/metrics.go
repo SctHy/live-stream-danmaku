@@ -58,7 +58,7 @@ func NewGatewayMetrics() *GatewayMetrics {
 			Buckets:   []float64{.0005, .001, .002, .005, .01, .025, .05, .1, .25},
 		}),
 	}
-	for _, reason := range []string{"invalid", "muted", "rate_limited", "filtered", "unavailable"} {
+	for _, reason := range []string{"invalid", "muted", "rate_limited", "room_muted", "slow_mode", "filtered", "unavailable"} {
 		m.rejected[reason] = rejects.WithLabelValues(reason)
 	}
 	reg.MustRegister(m.wait)

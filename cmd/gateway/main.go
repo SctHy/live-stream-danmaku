@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -102,11 +104,41 @@ func run() (code int) {
 	})
 	go m.Start()
 	r := http.NewServeMux()
-	httpapi.NewChatHandler(history, m, sessions, *allowDev).Routes(r)
+	handler := httpapi.NewChatHandler(history, m, sessions, *allowDev)
+	handler.Routes(r)
+	deliveryCtx, endDelivery := context.WithCancel(ctx)
+	deliveryDone := make(chan struct{})
+	var keysReady atomic.Bool
+	go func() {
+		defer close(deliveryDone)
+		for deliveryCtx.Err() == nil {
+			op, cancel := context.WithTimeout(deliveryCtx, time.Minute)
+			err := sessions.UpgradeSessionKeys(op)
+			cancel()
+			if err == nil {
+				keysReady.Store(true)
+				handler.RetryModeration(deliveryCtx)
+				return
+			}
+			log.Warn("Upgrade Redis session keys", "error", err)
+			select {
+			case <-deliveryCtx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+		}
+	}()
+	defer func() { endDelivery(); <-deliveryDone }()
 	r.HandleFunc("GET /livez", func(w http.ResponseWriter, req *http.Request) { w.WriteHeader(200) })
-	r.HandleFunc("GET /readyz", readiness(m.Retiring, sessions.Ping))
+	r.HandleFunc("GET /readyz", readiness(func() bool { return m.Retiring() || !keysReady.Load() }, sessions.Ping))
 	r.Handle("GET /metrics", telemetry.Handler())
-	srv := http.Server{Addr: net.JoinHostPort(*host, *port), Handler: httpapi.Recover(log, r), ReadHeaderTimeout: 5 * time.Second}
+	srv := http.Server{Addr: net.JoinHostPort(*host, *port), Handler: httpapi.Recover(log, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !keysReady.Load() && strings.HasPrefix(req.URL.Path, "/api/rooms/") && !strings.HasSuffix(req.URL.Path, "/history") {
+			w.WriteHeader(503)
+			return
+		}
+		r.ServeHTTP(w, req)
+	})), ReadHeaderTimeout: 5 * time.Second}
 	if words != nil {
 		reload := make(chan os.Signal, 1)
 		signal.Notify(reload, syscall.SIGHUP)

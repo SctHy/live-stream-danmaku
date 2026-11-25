@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -24,44 +25,64 @@ end
 local id=epoch..'@'..redis.call('XADD',KEYS[1],'MAXLEN','~',256,'*','packet',ARGV[1],'prev',prev,'epoch',epoch)
 redis.call('EXPIRE',KEYS[1],120)
 local wire='{"pos":"'..id..'","prev":"'..prev..'","packet":'..ARGV[1]..'}'
-redis.call('PUBLISH',KEYS[2],wire)
+redis.call('PUBLISH',ARGV[#ARGV],wire)
 `
 
 const appendEventLua = journalLua + `return id`
 
 func (s *Store) Journal(ctx context.Context, room string, payload []byte) error {
 	r := s.r
-	return s.appendEvent.Run(ctx, r, []string{"dm:{" + room + "}:recent", fmt.Sprintf(KeyRoomPubSub, room)}, string(payload), rand.Text()).Err()
+	return s.appendEvent.Run(ctx, r, []string{sessionPrefix(room) + "recent"}, string(payload), rand.Text(), fmt.Sprintf(KeyRoomPubSub, room)).Err()
+}
+
+var journalOnce = redis.NewScript(`if redis.call('GET',KEYS[2])==ARGV[3] then return 0 end
+` + journalLua + `redis.call('SET',KEYS[2],ARGV[3])
+return 1`)
+
+// The room dispatcher processes audits in order. A repeated delivery must keep its cursor.
+func (s *Store) JournalOnce(ctx context.Context, room string, payload []byte, auditID int64) error {
+	prefix := sessionPrefix(room)
+	return journalOnce.Run(ctx, s.r, []string{prefix + "recent", prefix + "last_control"}, payload, rand.Text(), auditID, fmt.Sprintf(KeyRoomPubSub, room)).Err()
 }
 
 const acceptEventLua = `
-local existing=redis.call('GET',KEYS[3])
-if existing then return {'accepted',existing} end
-if redis.call('EXISTS',KEYS[4])==1 then return {'muted',''} end
-local n=redis.call('INCR',KEYS[5])
-if n==1 then redis.call('PEXPIRE',KEYS[5],1000) end
+local state=redis.call('MGET',KEYS[2],KEYS[3],KEYS[5])
+if state[1] then return {'accepted',state[1]} end
+if state[2] then return {'muted',''} end
+local slow=0
+if state[3] and not (ARGV[4]=='1' and redis.call('SISMEMBER',KEYS[6],ARGV[5])==1) then
+ slow=tonumber(state[3])
+ if slow<0 then return {'room_muted',''} end
+ -- A fixed 300s lifetime lets a changed policy take effect on the next send.
+ if redis.call('PTTL',KEYS[7])>(300-slow)*1000 then return {'slow_mode',''} end
+end
+local n=redis.call('INCR',KEYS[4])
+if n==1 then redis.call('PEXPIRE',KEYS[4],1000) end
 if n>8 then return {'rate_limited',''} end
+if slow>0 then redis.call('SET',KEYS[7],'1','EX',300) end
 ` + journalLua + `
-redis.call('SET',KEYS[3],ARGV[3],'EX',600)
+redis.call('SET',KEYS[2],ARGV[3],'EX',600)
 return {'new',ARGV[3]}
 `
 
 func (s *Store) AcceptDanmaku(ctx context.Context, msg protocol.DanmakuMessage, payload []byte) (string, string, error) {
 	r := s.r
-	prefix := fmt.Sprintf("dm:{%s}:", msg.RoomID)
+	prefix := sessionPrefix(msg.RoomID)
 	user := fmt.Sprint(msg.UserID)
 	request := msg.ClientMsgID
 	if request == "" {
 		request = msg.EventID
 	}
+	slug, _, _ := strings.Cut(msg.RoomID, "/")
+	roomPrefix := sessionPrefix(slug)
 	keys := []string{
-		"dm:{" + msg.RoomID + "}:recent",
-		fmt.Sprintf(KeyRoomPubSub, msg.RoomID),
+		prefix + "recent",
 		prefix + "send:" + user + ":" + request,
 		prefix + "mute:" + user,
 		prefix + fmt.Sprintf("rate:%s:%d", user, protocol.TypeDanmaku),
+		roomPrefix + "gate", roomPrefix + "staff", roomPrefix + "slow:" + user,
 	}
-	result, err := s.acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID).StringSlice()
+	result, err := s.acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID, msg.Nickname != "", user, fmt.Sprintf(KeyRoomPubSub, msg.RoomID)).StringSlice()
 	if err != nil {
 		return "unavailable", "", err
 	}
@@ -76,7 +97,7 @@ type Recovery struct {
 
 func (s *Store) Recover(ctx context.Context, room, after string) (Recovery, error) {
 	r := s.r
-	entries, err := r.XRange(ctx, "dm:{"+room+"}:recent", "-", "+").Result()
+	entries, err := r.XRange(ctx, sessionPrefix(room)+"recent", "-", "+").Result()
 	out := Recovery{Events: []protocol.WsPacket{}, Position: "0-0", Reset: after != "" && after != "0-0"}
 	if err != nil {
 		return out, err
@@ -154,7 +175,7 @@ return 'ok'`
 
 func (s *Store) Policy(ctx context.Context, room string, uid uint64, action int) (string, error) {
 	r := s.r
-	prefix := fmt.Sprintf("dm:{%s}:", room)
+	prefix := sessionPrefix(room)
 	user := fmt.Sprint(uid)
 	return s.allowAction.Run(ctx, r, []string{prefix + "mute:" + user, prefix + fmt.Sprintf("rate:%s:%d", user, action)}, time.Second.Milliseconds(), 8).Text()
 }

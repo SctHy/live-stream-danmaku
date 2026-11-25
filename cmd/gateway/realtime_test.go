@@ -69,6 +69,9 @@ func serveTestRedis(c net.Conn) {
 			for i, ch := range args[1:] {
 				fmt.Fprintf(&reply, "*3\r\n+%s\r\n$%d\r\n%s\r\n:%d\r\n", cmd, len(ch), ch, i+1)
 			}
+		case "evalsha":
+			// The mute script updates the expiring key and the room index together.
+			reply.WriteString(":1\r\n")
 		case "xrange":
 			reply.WriteString("*0\r\n")
 		case "set", "client":
