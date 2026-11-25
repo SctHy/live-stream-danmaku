@@ -18,7 +18,6 @@ x-gateway: &gateway
     start_period: 5s
   depends_on:
     redis: { condition: service_healthy }
-    postgres: { condition: service_healthy }
     kafka: { condition: service_started }
   restart: unless-stopped
 

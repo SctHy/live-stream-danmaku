@@ -15,12 +15,17 @@ import (
 var migrations embed.FS
 
 func Open() (*pgxpool.Pool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return OpenContext(ctx)
+}
+
+// OpenContext returns a pool only after all schema migrations succeed.
+func OpenContext(ctx context.Context) (*pgxpool.Pool, error) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		dsn = "postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, err

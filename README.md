@@ -73,7 +73,7 @@ make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 | POST | `/api/rooms/{room}/{session}/moderate` | 房管操作（校验同源、房间权限和 Bearer 密钥）：按 `event_id` 撤回弹幕，或按 `user_id` 禁言指定秒数 |
 | GET | `/api/live/playurl?room_id=6` | 查询 B 站数字直播间开播状态与可用播放地址 |
 | GET | `/livez` | 进程存活检查（Gateway 与 Archiver 均提供） |
-| GET | `/readyz` | 服务就绪检查（Gateway 检查停机状态、Redis 与 PostgreSQL；Archiver 检查 PostgreSQL；未就绪返回 503） |
+| GET | `/readyz` | 服务就绪检查（Gateway 检查停机状态与 Redis；Gateway 在 PostgreSQL 故障期间继续提供实时服务，历史查询和撤回返回 503，数据库恢复后自动重试；Archiver 检查 PostgreSQL；未就绪返回 503） |
 | GET | `/metrics` | Prometheus 监控指标（Gateway 复用主端口；Archiver 需通过 `-metrics-addr` 显式开启） |
 
 ## 项目结构

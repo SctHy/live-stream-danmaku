@@ -19,7 +19,6 @@ import (
 	"github.com/scthy/maku/internal/metrics"
 	"github.com/scthy/maku/internal/mq"
 	"github.com/scthy/maku/internal/pubsub"
-	"github.com/scthy/maku/internal/store"
 )
 
 func main() { os.Exit(run()) }
@@ -69,12 +68,10 @@ func run() (code int) {
 		}
 	}
 	telemetry := metrics.NewGatewayMetrics()
-	db, err := store.Open()
-	if err != nil {
-		log.Error("PostgreSQL startup", "error", err)
-		return 1
-	}
-	defer db.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	history := startHistory(ctx, openHistory, 5*time.Second, log)
+	defer history.Close()
 	sessions := pubsub.Open(os.Getenv("REDIS_ADDR"))
 	defer sessions.Close()
 	producer, err := mq.NewProducer(mq.Brokers(os.Getenv("KAFKA_BROKERS")), log, telemetry)
@@ -105,29 +102,11 @@ func run() (code int) {
 	})
 	go m.Start()
 	r := http.NewServeMux()
-	httpapi.NewChatHandler(store.NewMessageRepo(db), m, sessions, *allowDev).Routes(r)
+	httpapi.NewChatHandler(history, m, sessions, *allowDev).Routes(r)
 	r.HandleFunc("GET /livez", func(w http.ResponseWriter, req *http.Request) { w.WriteHeader(200) })
-	r.HandleFunc("GET /readyz", func(w http.ResponseWriter, req *http.Request) {
-		if m.Retiring() {
-			w.WriteHeader(503)
-			return
-		}
-		ctx, cancel := context.WithTimeout(req.Context(), time.Second)
-		defer cancel()
-		if err := sessions.Ping(ctx); err != nil {
-			w.WriteHeader(503)
-			return
-		}
-		if err := db.Ping(ctx); err != nil {
-			w.WriteHeader(503)
-			return
-		}
-		w.WriteHeader(200)
-	})
+	r.HandleFunc("GET /readyz", readiness(m.Retiring, sessions.Ping))
 	r.Handle("GET /metrics", telemetry.Handler())
 	srv := http.Server{Addr: net.JoinHostPort(*host, *port), Handler: httpapi.Recover(log, r), ReadHeaderTimeout: 5 * time.Second}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	if words != nil {
 		reload := make(chan os.Signal, 1)
 		signal.Notify(reload, syscall.SIGHUP)
@@ -169,4 +148,20 @@ func run() (code int) {
 		return 1
 	}
 	return code
+}
+
+func readiness(retiring func() bool, ping func(context.Context) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if retiring() {
+			w.WriteHeader(503)
+			return
+		}
+		ctx, cancel := context.WithTimeout(req.Context(), time.Second)
+		defer cancel()
+		if err := ping(ctx); err != nil {
+			w.WriteHeader(503)
+			return
+		}
+		w.WriteHeader(200)
+	}
 }
