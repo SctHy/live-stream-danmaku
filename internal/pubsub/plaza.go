@@ -101,7 +101,8 @@ func (s *Store) Attendance(ctx context.Context, room string) (int64, int64, erro
 }
 
 var creditGift = redis.NewScript(`
-if redis.call('GET',KEYS[1])==ARGV[1] then return 0 end
+local last=redis.call('GET',KEYS[1])
+if last and (#last>#ARGV[1] or (#last==#ARGV[1] and last>=ARGV[1])) then return 0 end
 redis.call('ZINCRBY',KEYS[2],ARGV[3],ARGV[2])
 redis.call('HSET',KEYS[3],ARGV[2],ARGV[4])
 redis.call('SET',KEYS[1],ARGV[1])
@@ -174,4 +175,20 @@ return redis.call('SET',KEYS[1],ARGV[1]..':'..token..':'..ARGV[2])`)
 
 func (s *Store) BumpRoomRevision(ctx context.Context, slug string) error {
 	return bumpRevision.Run(ctx, s.r, []string{"dm:{hot}:room_revision"}, rand.Text(), slug).Err()
+}
+
+// One room cursor is sufficient because only its pending head can advance.
+// Keep the last result beyond the combo TTL for retries after a gateway crash.
+var countCombo = redis.NewScript(`
+local last=redis.call('HGET',KEYS[1],'id')
+if last==ARGV[1] then return redis.call('HGET',KEYS[1],'count') end
+if last and (#last>#ARGV[1] or (#last==#ARGV[1] and last>ARGV[1])) then return 0 end
+local count=redis.call('INCRBY',KEYS[2],ARGV[2])
+redis.call('PEXPIRE',KEYS[2],5000)
+redis.call('HSET',KEYS[1],'id',ARGV[1],'count',count)
+return count`)
+
+func (s *Store) Combo(ctx context.Context, room, key string, id int64, qty int) (int, error) {
+	prefix := fmt.Sprintf("dm:{%s}:combo:", room)
+	return countCombo.Run(ctx, s.r, []string{prefix + "cursor", prefix + "value:" + key}, id, qty).Int()
 }

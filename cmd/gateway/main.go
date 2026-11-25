@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/scthy/maku/internal/commerce"
 	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/httpapi"
 	"github.com/scthy/maku/internal/hub"
@@ -69,6 +70,11 @@ func run() (code int) {
 			return 1
 		}
 	}
+	plugins, err := commerce.LoadPlugins(os.Getenv("GIFT_CATALOG_FILE"), os.Getenv("PAYMENT_WEBHOOK_SECRET"), os.Getenv("VOUCHER_CODES"))
+	if err != nil {
+		log.Error("Invalid commerce configuration", "error", err)
+		return 2
+	}
 	telemetry := metrics.NewGatewayMetrics()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -102,9 +108,11 @@ func run() (code int) {
 		DisableArrivalBatching: *gap == 0,
 		MinBatchViewers:        *minViewers,
 	})
-	go m.Start()
+
 	r := http.NewServeMux()
 	handler := httpapi.NewChatHandler(history, m, sessions, *allowDev)
+	handler.SetCommerce(plugins)
+	go m.Start()
 	handler.Routes(r)
 	deliveryCtx, endDelivery := context.WithCancel(ctx)
 	deliveryDone := make(chan struct{})

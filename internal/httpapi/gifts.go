@@ -9,31 +9,22 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/scthy/maku/internal/commerce"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/store"
 )
 
-type gift struct {
-	Code  string `json:"code"`
-	Name  string `json:"name"`
-	Price int64  `json:"price"`
-	Super bool   `json:"is_superchat"`
-	Pin   int    `json:"pin_seconds"`
-}
-
-var catalog = []gift{{"glowstick", "荧光棒", 10, false, 0}, {"coffee", "咖啡", 50, false, 0}, {"rocket", "火箭", 200, false, 0}, {"sc", "醒目留言", 100, true, 30}, {"sc_super", "超级醒目留言", 300, true, 60}}
-
-func giftCatalog(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"gifts": catalog})
+func (h *ChatHandler) giftCatalog(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"gifts": h.plugins.Catalog.List()})
 }
 func (h *ChatHandler) wallet(w http.ResponseWriter, r *http.Request) {
-	login, ok := h.requireLogin(w, r)
-	if !ok {
-		return
-	}
 	db := h.db()
 	if db == nil {
 		w.WriteHeader(503)
+		return
+	}
+	login, ok := h.requireLogin(w, r)
+	if !ok {
 		return
 	}
 	ctx := r.Context()
@@ -50,19 +41,12 @@ func (h *ChatHandler) wallet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"claimed": claimed, "amount": amount, "balance": balance})
 		return
 	}
-	var balance int64
-	var checked bool
-	err := db.QueryRow(ctx, "SELECT balance,EXISTS(SELECT FROM daily_checkins WHERE user_id=$1 AND claim_date=CURRENT_DATE) FROM users WHERE id=$1", login.UserID).Scan(&balance, &checked)
+	snapshot, err := store.ReadWallet(ctx, db, login.UserID)
 	if err != nil {
 		dbError(w, err)
 		return
 	}
-	orders, err := store.WalletOrders(ctx, db, login.UserID)
-	if err != nil {
-		dbError(w, err)
-		return
-	}
-	writeJSON(w, map[string]any{"balance": balance, "checked_in_today": checked, "orders": orders})
+	writeJSON(w, snapshot)
 }
 
 var orderID = regexp.MustCompile(`^[a-zA-Z0-9_-]{16,64}$`)
@@ -114,14 +98,18 @@ func (h *ChatHandler) gifts(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	var item gift
-	for _, g := range catalog {
-		if g.Code == in.Code {
-			item = g
-			break
-		}
+	item, ok := h.plugins.Catalog.Get(in.Code)
+	if !ok || !orderID.MatchString(in.ID) {
+		w.WriteHeader(400)
+		return
 	}
-	if !orderID.MatchString(in.ID) || item.Code == "" || in.Quantity < 1 || in.Quantity > 99 || (item.Super && (in.Quantity != 1 || !validText(in.Message, 1, 120))) || (!item.Super && !validText(in.Message, 0, 60)) {
+	effect := h.plugins.Effects[item.EffectType]
+	if effect == nil {
+		w.WriteHeader(503)
+		return
+	}
+	key, err := effect.Prepare(item, commerce.GiftRequest{SenderID: login.UserID, Quantity: in.Quantity, Message: in.Message})
+	if err != nil {
 		w.WriteHeader(400)
 		return
 	}
@@ -130,7 +118,7 @@ func (h *ChatHandler) gifts(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		return
 	}
-	g, balance, duplicate, err := store.BuyGift(ctx, db, store.GiftOrder{ClientOrderID: in.ID, RoomID: room, RoomSlug: r.PathValue("room"), SenderID: login.UserID, GiftCode: item.Code, GiftName: item.Name, Quantity: in.Quantity, UnitPrice: item.Price, TotalCost: item.Price * int64(in.Quantity), Message: message}, item.Pin)
+	g, balance, duplicate, err := store.BuyGift(ctx, db, store.GiftOrder{EffectType: item.EffectType, ComboKey: key, ClientOrderID: in.ID, RoomID: room, RoomSlug: r.PathValue("room"), SenderID: login.UserID, GiftCode: item.Code, GiftName: item.Name, Quantity: in.Quantity, UnitPrice: item.Price, TotalCost: item.Price * int64(in.Quantity), Message: message}, item.Pin)
 	if errors.Is(err, store.ErrInsufficientBalance) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(409)
@@ -141,8 +129,12 @@ func (h *ChatHandler) gifts(w http.ResponseWriter, r *http.Request) {
 		dbError(w, err)
 		return
 	}
-	if !duplicate {
-		if err = h.flushGifts(ctx, db, room); err != nil {
+	if err = h.flushGifts(ctx, db, g.RoomID); err != nil {
+		dbError(w, err)
+		return
+	}
+	if g.ComboKey != "" {
+		if err = db.QueryRow(ctx, "SELECT combo_count FROM gift_orders WHERE id=$1", g.ID).Scan(&g.ComboCount); err != nil {
 			dbError(w, err)
 			return
 		}
@@ -151,6 +143,20 @@ func (h *ChatHandler) gifts(w http.ResponseWriter, r *http.Request) {
 }
 func (h *ChatHandler) flushGifts(ctx context.Context, db *pgxpool.Pool, room string) error {
 	return store.DeliverGifts(ctx, db, room, func(g store.GiftOrder) error {
+		if g.ComboKey != "" {
+			count, err := h.sessions.Combo(ctx, room, g.ComboKey, g.ID, g.Quantity)
+			if err != nil {
+				return err
+			}
+			// A newer order has already acknowledged this head.
+			if count == 0 {
+				return nil
+			}
+			g.ComboCount = count
+			if _, err = db.Exec(ctx, "UPDATE gift_orders SET combo_count=$2 WHERE id=$1 AND pending", g.ID, count); err != nil {
+				return err
+			}
+		}
 		data, err := json.Marshal(g)
 		if err != nil {
 			return err

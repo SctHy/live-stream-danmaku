@@ -36,7 +36,8 @@ func (s *Store) Journal(ctx context.Context, room string, payload []byte) error 
 	return s.appendEvent.Run(ctx, r, []string{sessionPrefix(room) + "recent"}, string(payload), rand.Text(), fmt.Sprintf(KeyRoomPubSub, room)).Err()
 }
 
-var journalOnce = redis.NewScript(`if redis.call('GET',KEYS[2])==ARGV[3] then return 0 end
+var journalOnce = redis.NewScript(`local last=redis.call('GET',KEYS[2])
+if last and (#last>#ARGV[3] or (#last==#ARGV[3] and last>=ARGV[3])) then return 0 end
 ` + journalLua + `redis.call('SET',KEYS[2],ARGV[3])
 return 1`)
 

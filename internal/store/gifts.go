@@ -24,9 +24,12 @@ type GiftOrder struct {
 	Message       string     `json:"message"`
 	PinnedUntil   *time.Time `json:"pinned_until"`
 	CreatedAt     time.Time  `json:"created_at"`
+	EffectType    string     `json:"effect_type"`
+	ComboKey      string     `json:"combo_key"`
+	ComboCount    int        `json:"combo_count"`
 }
 
-const giftColumns = "id,client_order_id,room_id,room_slug,sender_id,sender_name,gift_code,gift_name,quantity,unit_price,total_cost,message,pinned_until,created_at"
+const giftColumns = "id,client_order_id,room_id,room_slug,sender_id,sender_name,gift_code,gift_name,quantity,unit_price,total_cost,message,pinned_until,created_at,effect_type,combo_key,combo_count"
 
 var ErrInsufficientBalance = errors.New("insufficient_balance")
 
@@ -38,7 +41,12 @@ func Checkin(ctx context.Context, db *pgxpool.Pool, uid uint64) (claimed bool, b
 		}
 		claimed = tag.RowsAffected() == 1
 		if claimed {
-			return tx.QueryRow(ctx, "UPDATE users SET balance=balance+500 WHERE id=$1 RETURNING balance", uid).Scan(&balance)
+			var date string
+			if e = tx.QueryRow(ctx, "SELECT CURRENT_DATE::text").Scan(&date); e != nil {
+				return e
+			}
+			_, balance, _, e = ApplyLedger(ctx, tx, uid, "checkin", date, 500, nil)
+			return e
 		}
 		return tx.QueryRow(ctx, "SELECT balance FROM users WHERE id=$1", uid).Scan(&balance)
 	})
@@ -63,10 +71,7 @@ func BuyGift(ctx context.Context, db *pgxpool.Pool, g GiftOrder, pin int) (order
 		if !errors.Is(e, pgx.ErrNoRows) {
 			return e
 		}
-		e = tx.QueryRow(ctx, "UPDATE users SET balance=balance-$1 WHERE id=$2 AND balance >= $1 RETURNING balance", g.TotalCost, g.SenderID).Scan(&balance)
-		if errors.Is(e, pgx.ErrNoRows) {
-			return ErrInsufficientBalance
-		}
+		_, balance, _, e = ApplyLedger(ctx, tx, g.SenderID, "gift_debit", g.ClientOrderID, -g.TotalCost, nil)
 		if e != nil {
 			return e
 		}
@@ -74,8 +79,12 @@ func BuyGift(ctx context.Context, db *pgxpool.Pool, g GiftOrder, pin int) (order
 		if e = lockGiftRoom(ctx, tx, g.RoomID); e != nil {
 			return e
 		}
-		e = tx.QueryRow(ctx, `INSERT INTO gift_orders(client_order_id,room_id,room_slug,sender_id,sender_name,gift_code,gift_name,quantity,unit_price,total_cost,message,pinned_until)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now()+NULLIF($12::int,0)*interval '1 second') RETURNING id,created_at,pinned_until`, g.ClientOrderID, g.RoomID, g.RoomSlug, g.SenderID, g.SenderName, g.GiftCode, g.GiftName, g.Quantity, g.UnitPrice, g.TotalCost, g.Message, pin).Scan(&g.ID, &g.CreatedAt, &g.PinnedUntil)
+		if g.EffectType == "" {
+			g.EffectType = "standard"
+		}
+		g.ComboCount = 1
+		e = tx.QueryRow(ctx, `INSERT INTO gift_orders(client_order_id,room_id,room_slug,sender_id,sender_name,gift_code,gift_name,quantity,unit_price,total_cost,message,pinned_until,effect_type,combo_key)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now()+NULLIF($12::int,0)*interval '1 second',$13,$14) RETURNING id,created_at,pinned_until`, g.ClientOrderID, g.RoomID, g.RoomSlug, g.SenderID, g.SenderName, g.GiftCode, g.GiftName, g.Quantity, g.UnitPrice, g.TotalCost, g.Message, pin, g.EffectType, g.ComboKey).Scan(&g.ID, &g.CreatedAt, &g.PinnedUntil)
 		order = g
 		return e
 	})
@@ -88,28 +97,23 @@ func lockGiftRoom(ctx context.Context, tx pgx.Tx, room string) error {
 
 func DeliverGifts(ctx context.Context, db *pgxpool.Pool, room string, send func(GiftOrder) error) error {
 	for {
-		err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-			if err := lockGiftRoom(ctx, tx, room); err != nil {
-				return err
-			}
-			rows, err := tx.Query(ctx, "SELECT "+giftColumns+" FROM gift_orders WHERE room_id=$1 AND pending ORDER BY id LIMIT 1", room)
-			if err != nil {
-				return err
-			}
-			g, err := pgx.CollectOneRow(rows, pgx.RowToStructByPos[GiftOrder])
-			if err != nil {
-				return err
-			}
-			if err = send(g); err != nil {
-				return err
-			}
-			_, err = tx.Exec(ctx, "UPDATE gift_orders SET pending=false WHERE id=$1", g.ID)
+		// Purchases allocate IDs under the room lock. Concurrent drainers can see
+		// the same head; Redis fences each side effect by its monotonic order ID.
+		rows, err := db.Query(ctx, "SELECT "+giftColumns+" FROM gift_orders WHERE room_id=$1 AND pending ORDER BY id LIMIT 1", room)
+		if err != nil {
 			return err
-		})
+		}
+		g, err := pgx.CollectOneRow(rows, pgx.RowToStructByPos[GiftOrder])
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
+			return err
+		}
+		if err = send(g); err != nil {
+			return err
+		}
+		if _, err = db.Exec(ctx, "UPDATE gift_orders SET pending=false WHERE id=$1 AND pending", g.ID); err != nil {
 			return err
 		}
 	}
@@ -129,7 +133,7 @@ func RecentGifts(ctx context.Context, db *pgxpool.Pool, room string, limit int, 
 	}
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[GiftOrder])
 }
-func WalletOrders(ctx context.Context, db *pgxpool.Pool, uid uint64) ([]GiftOrder, error) {
+func WalletOrders(ctx context.Context, db querier, uid uint64) ([]GiftOrder, error) {
 	rows, err := db.Query(ctx, "SELECT "+giftColumns+" FROM gift_orders WHERE sender_id=$1 ORDER BY id DESC LIMIT 20", uid)
 	if err != nil {
 		return nil, err

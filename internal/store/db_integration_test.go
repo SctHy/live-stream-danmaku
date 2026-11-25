@@ -105,7 +105,7 @@ INSERT INTO danmaku_messages(room_id,user_id,content,send_time) VALUES ('x',1,'l
 				t.Fatalf("withdrawal recorded=%v err=%v", recorded, err)
 			}
 			var versions int
-			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 7 {
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM danmaku_schema_migrations").Scan(&versions); err != nil || versions != 8 {
 				t.Fatalf("ledger: %d %v", versions, err)
 			}
 		})

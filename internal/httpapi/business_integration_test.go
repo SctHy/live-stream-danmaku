@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/scthy/maku/internal/commerce"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
 	"github.com/scthy/maku/internal/store"
@@ -265,5 +266,125 @@ func TestBusinessRoutesIntegration(t *testing.T) {
 	board := expect("GET", base+"/leaderboard", "", "", 200)
 	if board["contributors"].([]any)[0].(map[string]any)["total_cost"] != float64(1500) {
 		t.Fatal(board)
+	}
+
+	history.pool = db
+	{
+		packages := expect("GET", "/api/wallet/recharge-packages", "", "", 200)
+		if len(packages["providers"].([]any)) != 2 {
+			t.Fatal(packages)
+		}
+		create := func(id string) string {
+			data := expect("POST", "/api/wallet/recharges", fmt.Sprintf(`{"client_order_id":%q,"package_code":"coins_600"}`, id), token, 200)
+			return data["order"].(map[string]any)["order_no"].(string)
+		}
+		no := create("recharge-order-0001")
+		if no != create("recharge-order-0001") {
+			t.Fatal("duplicate recharge")
+		}
+		path := "/api/wallet/recharges/" + no
+		expect("GET", path, "", modToken, 404)
+		expect("POST", path+"/simulate", `{"action":"pay"}`, modToken, 404)
+		signedPay := func(order, trade string) int {
+			body, err := json.Marshal(commerce.WebhookEvent{OrderNo: order, Action: "pay", Trade: trade})
+			if err != nil {
+				t.Error(err)
+				return 0
+			}
+			req := httptest.NewRequest("POST", "/api/payments/webhook/sandbox", strings.NewReader(string(body)))
+			req.Header = h.plugins.Providers["sandbox"].(*commerce.Sandbox).Sign(body)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			return w.Code
+		}
+		for range 12 {
+			wg.Go(func() {
+				n := signedPay(no, "sandbox-"+no)
+				if n != 200 {
+					t.Errorf("payment status %d", n)
+				}
+				n, _ = call("POST", "/api/wallet/redeem", `{"code":"MAKU2026"}`, token)
+				if n != 200 {
+					t.Errorf("voucher status %d", n)
+				}
+			})
+		}
+		wg.Wait()
+		expect("POST", path+"/simulate", `{"action":"close"}`, token, 409)
+		expect("POST", path+"/simulate", `{"action":"pay"}`, token, 200)
+		closed := create("recharge-order-0002")
+		if status := signedPay(closed, "sandbox-"+no); status != 409 {
+			t.Fatal("replayed trade", status)
+		}
+		path = "/api/wallet/recharges/" + closed + "/simulate"
+		expect("POST", path, `{"action":"close"}`, token, 200)
+		expect("POST", path, `{"action":"pay"}`, token, 409)
+		expired := create("recharge-order-0003")
+		if _, err := db.Exec(ctx, "UPDATE recharge_orders SET expires_at=now() WHERE order_no=$1", expired); err != nil {
+			t.Fatal(err)
+		}
+		path = "/api/wallet/recharges/" + expired
+		if expect("GET", path, "", token, 200)["order"].(map[string]any)["status"] != "expired" {
+			t.Fatal("expired status")
+		}
+		expect("POST", path+"/simulate", `{"action":"pay"}`, token, 409)
+		expect("POST", "/api/payments/webhook/sandbox", `{}`, "", 403)
+		wallet := expect("GET", "/api/wallet", "", token, 200)
+		if wallet["balance"] != float64(1200) || len(wallet["recharges"].([]any)) != 3 || len(wallet["ledger"].([]any)) != 8 {
+			t.Fatal(wallet)
+		}
+		if err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+			entry, current, duplicate, err := store.ApplyLedger(ctx, tx, uid, "checkin", wallet["ledger"].([]any)[7].(map[string]any)["biz_id"].(string), 500, nil)
+			if err != nil {
+				return err
+			}
+			if !duplicate || current != 1200 || entry.After != 1500 {
+				return fmt.Errorf("duplicate ledger: %+v current %d", entry, current)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		balance := float64(1200)
+		for _, row := range wallet["ledger"].([]any) {
+			entry := row.(map[string]any)
+			before := entry["balance_before"].(float64)
+			if entry["balance_after"] != balance || before+entry["delta"].(float64) != balance {
+				t.Fatal(entry)
+			}
+			balance = before
+		}
+		combo := func(id string, want int) {
+			g := expect("POST", base+"/gifts", fmt.Sprintf(`{"client_order_id":%q,"gift_code":"glowstick","quantity":2}`, id), token, 200)["order"].(map[string]any)
+			if g["combo_count"] != float64(want) || g["effect_type"] != "combo" {
+				t.Fatal(g)
+			}
+		}
+		combo("glowstick-order-0001", 2)
+		combo("glowstick-order-0002", 4)
+		combo("glowstick-order-0001", 2)
+		time.Sleep(5100 * time.Millisecond)
+		combo("glowstick-order-0003", 2)
+		// Make a pending order and take its room lock on another connection
+		// during delivery. A dispatcher holding the transaction lock would fail.
+		if _, err := db.Exec(ctx, "UPDATE gift_orders SET pending=true WHERE client_order_id='glowstick-order-0003'"); err != nil {
+			t.Fatal(err)
+		}
+		err := store.DeliverGifts(ctx, db, room, func(g store.GiftOrder) error {
+			if db.Stat().AcquiredConns() != 0 {
+				return fmt.Errorf("delivery holds a pool connection")
+			}
+			var locked bool
+			if err := db.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock(hashtextextended($1,1606))", room).Scan(&locked); err != nil {
+				return err
+			}
+			if !locked {
+				return fmt.Errorf("delivery holds the room lock")
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

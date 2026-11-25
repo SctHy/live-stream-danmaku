@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/maku/internal/commerce"
 	"github.com/scthy/maku/internal/hub"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
@@ -37,6 +38,7 @@ type sessionStore interface {
 	Activity(context.Context) (map[string]pubsub.Activity, error)
 	Contributors(context.Context, string, int) ([]pubsub.Contributor, error)
 	Attendance(context.Context, string) (int64, int64, error)
+	Combo(context.Context, string, string, int64, int) (int, error)
 	Gift(context.Context, string, []byte, int64, uint64, int64, string, time.Time) error
 	Login(context.Context, string) (pubsub.Login, error)
 	SaveLogin(context.Context, string, pubsub.Login, time.Duration) error
@@ -59,11 +61,16 @@ type ChatHandler struct {
 	sessions     sessionStore
 	allowDev     bool
 	plaza        plazaCache
+	plugins      commerce.Plugins
 }
 
 func NewChatHandler(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool) *ChatHandler {
-	return &ChatHandler{liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
+	plugins := commerce.DefaultPlugins()
+	return &ChatHandler{plugins: plugins, liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
 }
+
+// SetCommerce installs the registries before serving requests.
+func (h *ChatHandler) SetCommerce(p commerce.Plugins) { h.plugins = p }
 
 func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	web, err := fs.Sub(assets, "web")
