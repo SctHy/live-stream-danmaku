@@ -1,10 +1,12 @@
-.PHONY: up up-monitoring down run-gateway run-archiver test bench-fanout
+.PHONY: up up-monitoring up-cluster down run-gateway run-archiver test bench-fanout
 up:
 	docker compose up -d
 up-monitoring:
 	docker compose --profile monitoring up -d
+up-cluster:
+	docker compose --profile cluster up -d --build
 down:
-	docker compose --profile monitoring down
+	docker compose --profile monitoring --profile cluster down
 run-gateway:
 	go run ./cmd/gateway $(ARGS)
 run-archiver:

@@ -95,7 +95,8 @@ maku/
 │   ├── pubsub/         # Redis Lua 脚本、共享订阅管理与在线人数/点赞统计
 │   └── store/          # PostgreSQL 连接池、内嵌 SQL 迁移与 UNNEST 批量写库
 ├── frontend/           # 纯 TypeScript 前端（不依赖 React/Vue，仅引入 mpegts.js / hls.js）
-├── deploy/             # Prometheus 采集配置
+├── Dockerfile          # 构建网关与归档服务镜像
+├── deploy/             # Nginx 负载均衡与 Prometheus 采集配置
 ├── docs/               # 完整性能测试报告（benchmarks.md）
 └── scripts/            # 浏览器级断线补发与网关迁移验证脚本
 ```
@@ -118,6 +119,14 @@ make run-gateway     # 终端 2：启动弹幕网关
 ```sh
 (cd frontend && npm ci && npm run build)
 ```
+
+### Nginx 双网关集群
+
+若已启动本地网关与归档进程，先将它们停止，再运行 `make up-cluster`。浏览器通过 `http://127.0.0.1:8080/` 进入房间。Nginx 对 `/metrics` 返回 403。要查看指标，可直接访问本机端口上的 `/metrics`，其中 `8081`、`8082` 分别对应 gateway-a、gateway-b，`9091` 对应归档服务。
+
+在集群中启用 Prometheus 时，先按 `deploy/prometheus.yml` 中的注释将采集目标改为 `gateway-a:8080`、`gateway-b:8080` 和 `archiver:9091`，再运行 `make up-monitoring`。
+
+运行 `docker compose logs -f nginx`，多次刷新页面，通过日志中的 `upstream=` 查看各请求命中的网关。要观察连接迁移，可让多个标签页进入同一房间，在另一终端运行 `docker compose stop gateway-a`，观察原先连到 gateway-a 的客户端重连并继续收发弹幕。运行 `docker compose start gateway-a` 恢复双网关。
 
 ## 常用配置
 

@@ -1,0 +1,17 @@
+.git
+.DS_Store
+Thumbs.db
+AGENTS.md
+frontend/node_modules
+evaluation/
+docs/
+scripts/
+coverage.txt
+profile.out
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+.env*
