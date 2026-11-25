@@ -58,7 +58,8 @@ func TestMigrationWaitsForOldConnectionOrDeadline(t *testing.T) {
 }
 
 func TestWritePumpSendsMigrationNotice(t *testing.T) {
-	stop := make(chan struct{})
+	clients := make(chan *Client, 1)
+	pumpDone := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var upgrader websocket.Upgrader
 		socket, err := upgrader.Upgrade(w, r, nil)
@@ -69,17 +70,28 @@ func TestWritePumpSendsMigrationNotice(t *testing.T) {
 		client := (&Hub{}).NewClient(1, "room", socket)
 		client.EnableMigration()
 		client.migration <- struct{}{}
-		client.done = stop
+		clients <- client
 		client.WritePump()
+		close(pumpDone)
 	}))
 	defer server.Close()
-	defer close(stop)
 	socket, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer socket.Close()
-	socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	client := <-clients
+	defer func() {
+		client.Close()
+		select {
+		case <-pumpDone:
+		case <-time.After(3 * time.Second):
+			t.Error("write pump did not exit")
+		}
+	}()
+	if err := socket.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	var packet protocol.WsPacket
 	if err := socket.ReadJSON(&packet); err != nil {
 		t.Fatal(err)
