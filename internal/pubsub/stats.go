@@ -42,9 +42,18 @@ func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[stri
 	}
 	cmds, execErr := p.Exec(ctx)
 	// Remove acknowledged increments so callers only requeue unconfirmed likes.
+	bucket := minuteKey(time.Now())
 	for room, cmd := range increments {
 		if cmd.Err() == nil {
+			slug, _, _ := strings.Cut(room, "/")
+			p.ZIncrBy(ctx, bucket, float64(likes[room])*0.2, slug)
 			delete(likes, room)
+		}
+	}
+	if p.Len() > 0 {
+		p.Expire(ctx, bucket, 15*time.Minute)
+		if _, err := p.Exec(ctx); err != nil {
+			return nil, err
 		}
 	}
 	for _, cmd := range cmds {
@@ -116,6 +125,21 @@ func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[stri
 			}
 		}
 		if _, err := p.Exec(ctx); err != nil {
+			return nil, err
+		}
+	}
+	args := []any{max(1, int(ttl.Seconds()))}
+	for room, v := range out {
+		key := fmt.Sprintf("dm:{%s}:", room)
+		p.Set(ctx, key+"online", v.Online, ttl)
+		p.ZAddGT(ctx, key+"peak_online", redis.Z{Score: float64(v.Online), Member: "peak"})
+		args = append(args, room, v.Online)
+	}
+	if _, err := p.Exec(ctx); err != nil {
+		return nil, err
+	}
+	if len(args) > 1 {
+		if err := refreshOnline.Run(ctx, r, onlineKeys, args...).Err(); err != nil {
 			return nil, err
 		}
 	}

@@ -40,6 +40,10 @@ func (h *ChatHandler) db() *pgxpool.Pool {
 }
 func (h *ChatHandler) businessRoutes(mux *http.ServeMux) {
 	routes := map[string]http.HandlerFunc{
+		"GET /api/rooms": h.square, "GET /api/gifts/catalog": giftCatalog,
+		"GET /api/wallet": h.wallet, "POST /api/wallet/checkin": h.wallet,
+		"GET /api/rooms/{room}/{session}/gifts": h.gifts, "POST /api/rooms/{room}/{session}/gifts": h.gifts,
+		"GET /api/rooms/{room}/{session}/leaderboard": h.leaderboard, "GET /api/rooms/{room}/{session}/analytics": h.analytics,
 		"POST /api/auth/register": h.credentials, "POST /api/auth/login": h.credentials,
 		"GET /api/auth/me": h.me, "PATCH /api/auth/me": h.me, "POST /api/auth/logout": h.logout,
 		"POST /api/rooms": h.rooms, "GET /api/rooms/{room}": h.rooms, "PATCH /api/rooms/{room}": h.rooms,

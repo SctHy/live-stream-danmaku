@@ -23,7 +23,7 @@ type Room struct {
 
 func LoadRoom(ctx context.Context, tx pgx.Tx, slug string, lock bool) (Room, error) {
 	var v Room
-	query := `SELECT slug,owner_id::bigint,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at FROM rooms WHERE slug=$1`
+	query := `SELECT slug,owner_id,title,description,active_session,bilibili_room_id,notice,status,slow_mode_seconds,mute_all,created_at,updated_at FROM rooms WHERE slug=$1`
 	if lock {
 		query += " FOR UPDATE"
 	}

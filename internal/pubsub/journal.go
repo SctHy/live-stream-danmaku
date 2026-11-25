@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -85,6 +86,11 @@ func (s *Store) AcceptDanmaku(ctx context.Context, msg protocol.DanmakuMessage, 
 	result, err := s.acceptEvent.Run(ctx, r, keys, payload, rand.Text(), msg.EventID, msg.Nickname != "", user, fmt.Sprintf(KeyRoomPubSub, msg.RoomID)).StringSlice()
 	if err != nil {
 		return "unavailable", "", err
+	}
+	if result[0] == "new" {
+		if err := s.addHeat(ctx, slug, 1); err != nil {
+			slog.Warn("Record danmaku heat", "error", err)
+		}
 	}
 	return result[0], result[1], nil
 }

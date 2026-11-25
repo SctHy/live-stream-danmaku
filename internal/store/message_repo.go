@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -55,6 +56,10 @@ func (r *MessageRepo) Withdraw(ctx context.Context, room, id string) error {
 }
 
 func (r *MessageRepo) ListHistory(ctx context.Context, room string, beforeID uint64, limit int) ([]protocol.DanmakuMessage, bool, error) {
+	return r.SearchHistory(ctx, room, beforeID, limit, "", nil)
+}
+
+func (r *MessageRepo) SearchHistory(ctx context.Context, room string, beforeID uint64, limit int, keyword string, uid *uint64) ([]protocol.DanmakuMessage, bool, error) {
 	if limit < 1 {
 		limit = 50
 	}
@@ -63,10 +68,20 @@ func (r *MessageRepo) ListHistory(ctx context.Context, room string, beforeID uin
 	if beforeID > math.MaxInt64 {
 		beforeID = 0
 	}
-	rows, err := r.db.Query(ctx, `SELECT m.id,coalesce(m.event_id,''),m.room_id,m.user_id::text,m.content,m.send_time,m.nickname
+	query := `SELECT m.id,coalesce(m.event_id,''),m.room_id,m.user_id::text,m.content,m.send_time,m.nickname
  FROM danmaku_messages m WHERE m.room_id=$1 AND ($2::bigint=0 OR m.id<$2)
  AND NOT EXISTS (SELECT 1 FROM danmaku_withdrawals w WHERE w.room_id=m.room_id AND w.event_id=m.event_id)
- ORDER BY m.id DESC LIMIT $3`, room, int64(beforeID), limit+1)
+`
+	args := []any{room, int64(beforeID), limit + 1}
+	if keyword != "" {
+		query += ` AND m.content ILIKE $4`
+		args = append(args, "%"+strings.NewReplacer(`\`, `\\`, "%", "\\%", "_", "\\_").Replace(keyword)+"%")
+	}
+	if uid != nil {
+		query += " AND m.user_id=$" + strconv.Itoa(len(args)+1) + "::text::numeric"
+		args = append(args, strconv.FormatUint(*uid, 10))
+	}
+	rows, err := r.db.Query(ctx, query+" ORDER BY m.id DESC LIMIT $3", args...)
 	if err != nil {
 		return nil, false, err
 	}

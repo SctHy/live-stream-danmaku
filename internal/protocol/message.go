@@ -17,6 +17,7 @@ const (
 	TypeMigrate     = 107
 	TypeLiveDanmaku = 108
 	TypeRoomState   = 109
+	TypeGift        = 110
 )
 
 // WsPacket carries a typed payload and optional recovery cursors.

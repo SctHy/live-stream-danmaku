@@ -48,6 +48,24 @@ func (h *ChatHandler) RetryModeration(ctx context.Context) {
 				return
 			}
 		}
+		op, cancel = context.WithTimeout(ctx, 3*time.Second)
+		giftRows, giftErr := db.Query(op, "SELECT DISTINCT room_id FROM gift_orders WHERE pending")
+		var giftRooms []string
+		if giftErr == nil {
+			giftRooms, giftErr = pgx.CollectRows(giftRows, pgx.RowTo[string])
+		}
+		cancel()
+		for _, room := range giftRooms {
+			op, cancel = context.WithTimeout(ctx, 3*time.Second)
+			giftErr = h.flushGifts(op, db, room)
+			cancel()
+			if giftErr != nil {
+				break
+			}
+		}
+		if giftErr != nil && ctx.Err() == nil {
+			slog.Warn("Retry gift delivery", "error", giftErr)
+		}
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("Retry moderation delivery", "error", err)
 		}

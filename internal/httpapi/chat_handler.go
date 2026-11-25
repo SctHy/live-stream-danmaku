@@ -32,6 +32,12 @@ type HistoryStore interface {
 	Withdraw(context.Context, string, string) error
 }
 type sessionStore interface {
+	RoomRevision(context.Context) (string, error)
+	BumpRoomRevision(context.Context, string) error
+	Activity(context.Context) (map[string]pubsub.Activity, error)
+	Contributors(context.Context, string, int) ([]pubsub.Contributor, error)
+	Attendance(context.Context, string) (int64, int64, error)
+	Gift(context.Context, string, []byte, int64, uint64, int64, string, time.Time) error
 	Login(context.Context, string) (pubsub.Login, error)
 	SaveLogin(context.Context, string, pubsub.Login, time.Duration) error
 	Logout(context.Context, string) error
@@ -51,10 +57,11 @@ type ChatHandler struct {
 	manager  *hub.Hub
 	sessions sessionStore
 	allowDev bool
+	plaza    plazaCache
 }
 
 func NewChatHandler(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool) *ChatHandler {
-	return &ChatHandler{history, m, sessions, allowDev}
+	return &ChatHandler{history: history, manager: m, sessions: sessions, allowDev: allowDev}
 }
 
 func (h *ChatHandler) Routes(mux *http.ServeMux) {
@@ -65,9 +72,9 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /assets/protocol.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d, liveDanmaku=%d, roomState=%d;\n",
+		fmt.Fprintf(w, "export const danmaku=%d, stats=%d, like=%d, receipt=%d, withdraw=%d, ready=%d, migrate=%d, liveDanmaku=%d, roomState=%d, gift=%d;\n",
 			protocol.TypeDanmaku, protocol.TypeStats, protocol.TypeLike, protocol.TypeReceipt,
-			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate, protocol.TypeLiveDanmaku, protocol.TypeRoomState)
+			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate, protocol.TypeLiveDanmaku, protocol.TypeRoomState, protocol.TypeGift)
 	})
 	mux.Handle("GET /assets/", http.FileServerFS(web))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {

@@ -112,6 +112,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 			return (store.Audit{Action: "create_room", Actor: v.OwnerID, Target: v.OwnerID}).Write(ctx, tx, v.Slug, v.ActiveSession)
 		})
 		if err == nil {
+			h.invalidateRoom(ctx, v.Slug)
 			err = h.flush(ctx, db, v.Slug)
 		}
 		if err != nil {
@@ -168,6 +169,7 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 		dbError(w, err)
 		return
 	}
+	h.invalidateRoom(ctx, v.Slug)
 	writeJSON(w, roomView{v, "owner"})
 }
 

@@ -73,13 +73,11 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		m.reply(c, input.ClientMsgID, "invalid")
 		return
 	}
-	if m.filter != nil {
-		if m.maskWords {
-			input.Content, _ = m.filter.Mask(input.Content, '*')
-		} else if m.filter.Contains(input.Content) {
-			m.reply(c, input.ClientMsgID, "filtered")
-			return
-		}
+	var allowed bool
+	input.Content, allowed = m.FilterMessage(input.Content)
+	if !allowed {
+		m.reply(c, input.ClientMsgID, "filtered")
+		return
 	}
 	msg := protocol.DanmakuMessage{Nickname: c.nickname, EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
 	body, err := json.Marshal(msg)
@@ -129,4 +127,15 @@ func (m *Hub) handleLike(c *Client, data []byte) {
 	m.likesMu.Lock()
 	m.localLikes[c.RoomID] += like.Count
 	m.likesMu.Unlock()
+}
+
+func (m *Hub) FilterMessage(content string) (string, bool) {
+	if m == nil || m.filter == nil {
+		return content, true
+	}
+	if m.maskWords {
+		masked, _ := m.filter.Mask(content, '*')
+		return masked, true
+	}
+	return content, !m.filter.Contains(content)
 }

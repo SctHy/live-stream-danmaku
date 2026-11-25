@@ -206,7 +206,34 @@ func (h *ChatHandler) listHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	msgs, more, err := h.history.ListHistory(r.Context(), roomID(r), before, limit)
+	var msgs []protocol.DanmakuMessage
+	var more bool
+	keyword := q.Get("q")
+	if !validText(keyword, 0, 64) {
+		w.WriteHeader(400)
+		return
+	}
+	var sender *uint64
+	if q.Has("user_id") {
+		id, e := strconv.ParseUint(q.Get("user_id"), 10, 64)
+		if e != nil {
+			w.WriteHeader(400)
+			return
+		}
+		sender = &id
+	}
+	if keyword != "" || sender != nil {
+		db := h.db()
+		if db == nil {
+			w.WriteHeader(503)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		msgs, more, err = store.NewMessageRepo(db).SearchHistory(ctx, roomID(r), before, limit, keyword, sender)
+	} else {
+		msgs, more, err = h.history.ListHistory(r.Context(), roomID(r), before, limit)
+	}
 	if err != nil {
 		w.WriteHeader(503)
 		return
