@@ -16,6 +16,7 @@ import {
   type Controls,
   type Room,
 } from './business'
+import {accountID, loggedIn, openAccount} from './account'
 let current: Room | undefined
 let liveControls: Controls | undefined
 function input(form: string, field: string) {
@@ -34,14 +35,34 @@ export function state(c: Controls) {
     .join(' · ')
   el('notice').textContent = c.notice
 }
+let revision = 0
 export async function roomInfo() {
-  current = await api<Room>(roomPath)
+  const version = ++revision
+  const room = await api<Room>(roomPath)
+  if (version !== revision) return
+  current = room
   el('title').textContent = current.title
   el('staffOpen').hidden = !['owner', 'moderator'].includes(current.role)
   document.body.classList.toggle('staff', !el('staffOpen').hidden)
   el('owner').hidden = current.role !== 'owner'
-  state(liveControls || current)
+  el('moderation-panel').hidden = !el('staffOpen').hidden
+  el('follow').hidden = false
+  el('follow').textContent = (current.following ? '已关注' : '关注') + ' · ' + current.follower_count + ' 粉丝'
+  state(liveControls || room)
+  const data = await taxonomy().catch(() => undefined)
+  if (version !== revision) return
+  const category = data?.categories.find(c => c.code === room.category)?.name || room.category
+  el('roomTags').textContent = [category, ...(room.tags || []).map(t => '#' + t)].filter(Boolean).join(' · ')
   return current
+}
+el('follow').onclick = () => {
+  if (!loggedIn()) return openAccount()
+  const b = el<HTMLButtonElement>('follow')
+  b.disabled = true
+  void run(async () => {
+    await api(roomPath + '/follow', current?.following ? 'DELETE' : 'POST')
+    await roomInfo()
+  }).finally(() => { b.disabled = false })
 }
 async function moderate(data: object) {
   await api(base + '/moderate', 'POST', data)
@@ -52,6 +73,8 @@ export function actions(event_id: string, user_id: number) {
   group.className = 'row-actions'
   group.append(
     button('撤回', () => moderate({ action: 'withdraw', event_id })),
+  )
+  if (user_id !== accountID()) group.append(
     button('禁言 10m', () => moderate({ action: 'mute', user_id, seconds: 600 })),
   )
   return group
@@ -92,7 +115,7 @@ async function controls() {
   input('slowForm', 'slow_mode_seconds').value = String(c.slow_mode_seconds)
   input('muteForm', 'mute_all').checked = c.mute_all
   if (current.role !== 'owner') return
-  for (const key of ['title', 'description', 'active_session', 'bilibili_room_id'] as const)
+  for (const key of ['title', 'description', 'active_session', 'bilibili_room_id', 'cover_theme'] as const)
     input('editRoom', key).value = current[key]
   const categories = el<HTMLFormElement>('editRoom').querySelector<HTMLSelectElement>('[name=category]')!
   categories.replaceChildren(...categoryOptions(await taxonomy()))
@@ -204,14 +227,22 @@ function maskKey() {
   el('showKey').textContent = '显示'
 }
 async function credentials(rotate: boolean) {
+  const version = revision
   const data = await api<{obs_server: string; obs_stream_key: string}>(
     roomPath + '/stream-key' + (rotate ? '/rotate' : ''), rotate ? 'POST' : 'GET',
   )
+  if (version !== revision) return
   maskKey()
   server.value = data.obs_server
   key.value = data.obs_stream_key
   el('obsStatus').textContent = rotate ? '推流码已重置，请更新 OBS 配置' : '推流配置已就绪'
 }
+window.addEventListener('accountchange', () => {
+  revision++
+  current = undefined
+  key.value = server.value = ''
+  maskKey()
+})
 el('showKey').onclick = () => {
   if (key.type === 'text') maskKey()
   else {

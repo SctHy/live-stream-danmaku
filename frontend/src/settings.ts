@@ -38,7 +38,7 @@ for (const [key, name, min, max, unit] of fields) {
   panel.append(field)
 }
 
-const colors = [['纯白', '#ffffff'], ['薄荷', '#34d399'], ['晴蓝', '#7dd3fc'], ['琥珀', '#fbbf24'], ['珊瑚', '#fb7185']]
+const colors = [['纯白', '#ffffff'], ['薄荷', '#34d399'], ['晴蓝', '#38bdf8'], ['琥珀', '#facc15'], ['珊瑚', '#fb7185']]
 const palette = document.createElement('fieldset')
 const legend = document.createElement('legend')
 legend.textContent = '文字颜色'

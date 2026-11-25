@@ -1,5 +1,11 @@
-type Message = {event_id: string; content: string; color?: string}
-type Sprite = {id: string; image: HTMLCanvasElement; x: number; lane: number}
+type Message = {event_id: string; content: string; color?: string; mode?: string}
+type Sprite = {id: string; image: HTMLCanvasElement; x: number; lane: number; fixed: boolean; expires: number; bottom: boolean}
+export function sendStyle() {
+  return {
+    color: document.querySelector<HTMLSelectElement>('#inkColor')!.value,
+    mode: document.querySelector<HTMLSelectElement>('#inkMode')!.value,
+  }
+}
 export const settings = {size: 24, density: 80, area: 75, opacity: 90, speed: 150, color: '#ffffff'}
 export const overlay = document.querySelector<HTMLCanvasElement>('#overlay')!
 const ctx = overlay.getContext('2d')!
@@ -43,7 +49,7 @@ function rasterize({content: text, color}: Message) {
   ink.textBaseline = 'middle'
   ink.lineWidth = 3
   ink.strokeText(text, 3, image.height / 2, image.width - 5)
-  ink.fillStyle = settings.color.toLowerCase() === '#ffffff' && color && /^#[0-9a-f]{6}$/i.test(color)
+  ink.fillStyle = settings.color === '#ffffff' && color && /^#[0-9a-f]{6}$/i.test(color)
     ? color : settings.color
   ink.fillText(text, 3, image.height / 2, image.width - 5)
   return image
@@ -57,20 +63,25 @@ function draw(now: number) {
   const occupied = new Set<number>()
   ctx.clearRect(0, 0, width, height)
   ctx.globalAlpha = settings.opacity / 100
-  sprites = sprites.filter(s => s.lane < lanes && s.x + s.image.width > 0)
+  sprites = sprites.filter(s => s.lane < lanes && (s.fixed ? s.expires > now : s.x + s.image.width > 0))
   for (const s of sprites) {
-    s.x -= step
-    if (reduced.matches || s.x + s.image.width + 16 > width) occupied.add(s.lane)
+    if (!s.fixed) s.x -= step
+    if (s.fixed || reduced.matches || s.x + s.image.width + 16 > width) occupied.add(s.bottom ? lanes - 1 - s.lane : s.lane)
   }
   while (pending.length && now - pending[0].time > 1200) pending.shift()
   let admitted = 0
   for (let lane = 0; lane < lanes && pending.length && sprites.length < settings.density && admitted < 4; lane++) {
-    if (occupied.has(lane)) continue
+    const bottom = pending[0].message.mode === 'bottom'
+    const slot = bottom ? lanes - 1 - lane : lane
+    if (occupied.has(slot)) continue
     const {message} = pending.shift()!
-    sprites.push({id: message.event_id, image: rasterize(message), x: width, lane})
+    const image = rasterize(message)
+    const fixed = bottom || message.mode === 'top'
+    sprites.push({id: message.event_id, image, x: fixed ? (width - image.width)/2 : width, lane, bottom, fixed, expires: now + 4000})
+    occupied.add(slot)
     admitted++
   }
-  for (const s of sprites) ctx.drawImage(s.image, reduced.matches ? 3 : Math.round(s.x), s.lane * pitch)
+  for (const s of sprites) ctx.drawImage(s.image, reduced.matches && !s.fixed ? 3 : Math.round(s.x), s.bottom ? height - (s.lane + 1) * pitch : s.lane * pitch)
   if (sprites.length || pending.length) frame = requestAnimationFrame(draw)
 }
 new ResizeObserver(() => {

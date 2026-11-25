@@ -6,19 +6,25 @@ interface Account {
   balance: number | null
 }
 let me: Account | undefined
+export const accountID = () => me?.user_id
 export const loggedIn = () => !!me?.authenticated
 export function setBalance(value: number | null) {
   if (!me) return
   me.balance = value
   const amount = value === null ? '余额暂不可用' : value + ' 积分'
-  el('identity').textContent = me.authenticated ? me.nickname + ' · ' + amount : '访客 ' + me.user_id
+  el('identity').textContent = me.authenticated ? me.nickname + ' · ' + amount : '访客 #' + String(me.user_id).slice(-4).padStart(4,'0')
+  el('identity').title = String(me.user_id)
   el('balance').textContent = amount
 }
+let accountVersion = 0
 export async function loadAccount() {
-  me = await api<Account>('/api/auth/me')
+  const version = ++accountVersion
+  const account = await api<Account>('/api/auth/me')
+  if (version !== accountVersion) return
+  me = account
   setBalance(me.balance)
   el('accountOpen').textContent = loggedIn() ? '账号与钱包' : '登录 / 注册'
-  el('wallet').hidden = el('createBox').hidden = !loggedIn()
+  el('wallet').hidden = !loggedIn()
   el('auth').hidden = loggedIn()
   el<HTMLFormElement>('rename').querySelector('input')!.value = me.nickname
 }
@@ -33,21 +39,26 @@ interface LedgerEntry {
   delta: number
   balance_after: number
 }
-const businessNames: Record<string, string> = { checkin: '签到', recharge: '充值', voucher: '兑换', gift_debit: '送礼' }
+const businessNames: Record<string, string> = { checkin: '签到', recharge: '充值', voucher: '兑换', gift_debit: '送礼', gift_income: '礼物收益' }
 const statuses = { pending: '待支付', paid: '已支付', closed: '已关闭', expired: '已过期' }
 let walletVersion = 0
 async function wallet() {
   const version = ++walletVersion
-  const w = await api<{ balance: number; checked_in_today: boolean; orders: Order[]; recharges: Recharge[]; ledger: LedgerEntry[] }>('/api/wallet')
+  const w = await api<{ balance: number; earnings: number; checked_in_today: boolean; orders: Order[]; recharges: Recharge[]; ledger: LedgerEntry[] }>('/api/wallet')
   if (version !== walletVersion) return
   setBalance(w.balance)
+  el('earnings').textContent = '主播收益：' + w.earnings + ' 积分'
   list('ledger', (w.ledger || []).map(e =>
-    (businessNames[e.biz_type] || e.biz_type) + ' · ' + (e.delta > 0 ? '+' : '') + e.delta + ' · 余额 ' + e.balance_after))
+    (businessNames[e.biz_type] || e.biz_type) + ' · ' + (e.delta > 0 ? '+' : '') + e.delta + (e.biz_type === 'gift_income' ? ' · 累计收益 ' : ' · 余额 ') + e.balance_after))
   const recharges = w.recharges || []
-  list('recharges', recharges.map(o => o.order_no + ' · ' + o.coins + ' 积分 · ' + statuses[o.status]))
+  list('recharges', recharges.map(o => o.order_no))
   recharges.forEach((o, index) => {
-    if (o.provider !== 'sandbox' || o.status !== 'pending') return
     const row = el('recharges').children[index]
+    const code = document.createElement('code'), status = document.createElement('span')
+    code.textContent = code.title = o.order_no
+    status.textContent = o.coins + ' 积分 · ' + statuses[o.status]
+    row.replaceChildren(code, status)
+    if (o.provider !== 'sandbox' || o.status !== 'pending') return
     for (const [action, label] of [['pay', '模拟支付成功'], ['close', '关闭订单']]) {
       row.append(button(label, async () => {
         try {
@@ -91,18 +102,26 @@ export function openAccount() {
   }
 }
 el('accountOpen').onclick = openAccount
+async function refreshIdentity() {
+  ++walletVersion
+  attempt = undefined
+  await loadAccount()
+  el<HTMLFormElement>('auth').reset()
+  window.dispatchEvent(new Event('accountchange'))
+  if (loggedIn()) await Promise.all([wallet(), packages()])
+}
 onForm('auth', async (data, action) => {
   await api('/api/auth/' + (action === 'login' ? 'login' : 'register'), 'POST', data)
-  location.reload()
+  await refreshIdentity()
 })
 onForm('rename', async (data) => {
   await api('/api/auth/me', 'PATCH', data)
-  location.reload()
+  await refreshIdentity()
 })
 el('logout').onclick = () =>
   void run(async () => {
     await api('/api/auth/logout', 'POST')
-    location.reload()
+    await refreshIdentity()
   })
 el('claim').onclick = () =>
   void run(async () => {

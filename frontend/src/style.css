@@ -157,3 +157,43 @@ dialog input { color: var(--text); }
 #recharges li { overflow-wrap: anywhere; }
 #recharges button { margin: 3px; padding: 3px 6px; font-size: 12px; }
 #effectiveStrategy { display: block; color: var(--secondary); }
+.bar { min-height: 54px; gap: 12px; padding-block: 7px; }
+main { padding-block: 14px; }
+#join #room { width: 120px; max-width: 100%; }
+.roomhead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; }
+.roomhead h1 { font-size: 24px; margin: 0; }
+.roomhead #state, #roomTags { margin: 0; font-size: 13px; color: var(--secondary); }
+#follow { color: var(--mint); font-size: 13px; padding: 4px 10px; }
+.toolbar, summary, .composer, aside h2 { padding: 9px 14px; }
+@media(min-width:801px) { .screen:not(:fullscreen) { max-height: clamp(200px, calc(100dvh - 365px), 600px); } }
+#plaza { width: min(960px,94vw); }
+#createToggle { margin-left: auto; color: var(--mint); }
+#rooms { grid-template-columns: repeat(auto-fit,minmax(min(100%,245px),1fr)); gap: 12px; }
+#rooms button { padding: 0 12px 12px; overflow: hidden; align-content: start; }
+.cover { display: flex; align-items: end; height: 64px; margin: 0 -12px 9px; padding: 8px 12px; font-size: 12px; background: linear-gradient(110deg,var(--cover,#323238),#16161a); }
+.cover[data-theme=emerald] { --cover: #165b47; }
+.cover[data-theme=ocean] { --cover: #234c69; }
+.cover[data-theme=amber] { --cover: #69502a; }
+.cover[data-theme=violet] { --cover: #504064; }
+.cover[data-theme=rose] { --cover: #613b49; }
+.cover[data-live=true]::before { content:''; background:var(--mint); width:7px; height:7px; margin:0 6px 6px 0; border-radius:50%; }
+dialog :is(ol,ul), aside details ol { list-style:none; padding:0; }
+dialog li, aside details li { border-bottom:1px solid var(--line); padding:7px 4px; }
+dialog .result:not(:empty) { position:sticky; bottom:0; background:var(--control); padding:8px; border:1px solid var(--line); }
+#recharges code { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#recharges span { white-space:nowrap; }
+#density { position:relative; background:#10221e; }
+#density svg { display:block; width:100%; height:32px; cursor:crosshair; }
+#density .area { fill:#34d39933; }
+#density .line, #density line { fill:none; stroke:var(--mint); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+#density line { stroke:white; }
+#density output { position:absolute; right:6px; top:0; font-size:12px; pointer-events:none; background:var(--card); }
+#density:not(:hover) output { visibility:hidden; }
+@media(max-width:600px) {
+  #compose { flex-wrap:wrap; }
+  #message { min-width:55%; }
+  .bar { gap:6px; }
+}
+#combos, #pins, #notice { max-height: 50px; overflow: auto; }
+#rooms button { display:block; }
+dialog .dialoghead { position:sticky; z-index:1; top:-20px; background:var(--card); padding-block:8px; }

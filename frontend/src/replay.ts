@@ -1,6 +1,6 @@
 import {api, button, el, roomPath, run, showDialog} from './business'
 import {loggedIn, openAccount} from './account'
-import {settings} from './danmaku'
+import {settings, sendStyle} from './danmaku'
 
 interface Recording {
   id: number
@@ -13,6 +13,8 @@ interface Recording {
   chunk_ms: number
 }
 interface Item {
+  mode?: string
+  color?: string
   id: number
   username: string
   content: string
@@ -65,13 +67,40 @@ export function replayLibrary(open: (r: Recording) => void) {
 }
 export function startReplay(video: HTMLVideoElement, r: Recording) {
   const scope = new AbortController()
+  const chart = el('density')
+  const svg = chart.querySelector('svg')!
+  const marker = svg.querySelector('line')!
+  void run(async () => {
+    const data = await api<{duration_ms:number; bucket_ms:number; buckets:number[]; max_count:number}>(root + '/' + r.id + '/density')
+    if (scope.signal.aborted || !data.duration_ms || !data.buckets.length) return
+    const points = data.buckets.map((n,i) => (100 * (i + .5) / data.buckets.length) + ' ' + (23 - 21*n/Math.max(1,data.max_count)))
+    const curve = 'M0 23 L' + points.join(' L') + ' L100 23'
+    svg.querySelector('.area')!.setAttribute('d', curve+' L100 24 H0 Z')
+    svg.querySelector('.line')!.setAttribute('d', curve)
+    svg.setAttribute('aria-valuemax',String(Math.floor(data.duration_ms/1000)))
+    const offset = (event: MouseEvent) => {
+      const rect = svg.getBoundingClientRect()
+      return Math.min(1,Math.max(0,(event.clientX-rect.left)/rect.width))*data.duration_ms
+    }
+    svg.onmousemove = event => {
+      const i = Math.min(data.buckets.length-1,Math.floor(offset(event)/data.bucket_ms))
+      chart.querySelector('output')!.value = stamp(i*data.bucket_ms)+'–'+stamp(Math.min(data.duration_ms,(i+1)*data.bucket_ms))+' · '+data.buckets[i]+' 条弹幕'
+    }
+    svg.onclick = event => { video.currentTime = offset(event)/1000 }
+    svg.onkeydown = event => {
+      if (!['ArrowLeft','ArrowRight'].includes(event.key)) return
+      event.preventDefault()
+      video.currentTime = Math.max(0,Math.min(data.duration_ms/1000,video.currentTime+(event.key==='ArrowRight'?1:-1)*data.bucket_ms/1000))
+    }
+    chart.hidden = false
+  })
   const endpoint = root + '/' + r.id + '/danmaku'
   const chunks = new Set<number>()
   const retryTimers = new Set<number>()
   const items = new Map<number, Item>()
   const buttons = new Map<number, HTMLButtonElement>()
   const ink = el('replayInk'), list = el('timeline')
-  const sprites = new Map<number, HTMLElement>()
+  const sprites = new Map<number, {node: HTMLElement; animation: Animation; layout: string; lane: number}>()
   let sorted: Item[] = [], active: number | undefined, frame = 0
   const reduced = matchMedia('(prefers-reduced-motion: reduce)')
   function merge(batch: Item[]) {
@@ -126,6 +155,12 @@ export function startReplay(video: HTMLVideoElement, r: Recording) {
   }
   function draw() {
     const now = video.currentTime * 1000
+    if (!chart.hidden) {
+      const pos = String(Math.min(100,100*now/r.duration_ms))
+      marker.setAttribute('x1',pos)
+      marker.setAttribute('x2',pos)
+      svg.setAttribute('aria-valuenow',String(Math.floor(now/1000)))
+    }
     let lo = 0, hi = sorted.length
     while (lo < hi) {
       const mid = Math.floor((lo + hi) / 2)
@@ -141,26 +176,48 @@ export function startReplay(video: HTMLVideoElement, r: Recording) {
     const width = ink.clientWidth, pitch = settings.size + 12
     const lanes = Math.floor(ink.clientHeight * settings.area / 100 / pitch)
     const visible = new Set<number>()
+    const fixedLanes = {top: new Set<number>(), bottom: new Set<number>()}
     const duration = Math.max(2000, width / settings.speed * 1000)
     for (let i = lo - 1; lanes && i >= 0 && visible.size < settings.density; i--) {
       const item = sorted[i], age = now - item.video_offset_ms
       if (age >= duration) break
+      let lane = i % lanes
+      if (item.mode === 'top' || item.mode === 'bottom') {
+        const slots = fixedLanes[item.mode]
+        const count = Math.max(1,Math.min(lanes,Math.floor(ink.clientHeight/(2*pitch))))
+        if (slots.size >= count) continue
+        lane = sprites.get(item.id)?.lane ?? 0
+        if (lane >= count || slots.has(lane)) lane = 0
+        while (slots.has(lane)) lane++
+        slots.add(lane)
+      }
       visible.add(item.id)
       let sprite = sprites.get(item.id)
-      if (!sprite) {
-        sprite = document.createElement('span')
-        sprite.textContent = item.content
-        ink.append(sprite)
+      const fixed = item.mode === 'top' || item.mode === 'bottom'
+      const y = item.mode === 'bottom' ? ink.clientHeight - (lane + 1)*pitch : lane*pitch
+      const layout = [width,y,duration,settings.size,settings.color,reduced.matches].join('/')
+      if (sprite?.layout !== layout) {
+        sprite?.animation.cancel()
+        const node = sprite?.node || document.createElement('span')
+        node.textContent = item.content
+        node.style.color = settings.color === '#ffffff' && item.color ? item.color : settings.color
+        node.style.fontSize = settings.size + 'px'
+        if (!sprite) ink.append(node)
+        const start = fixed ? `calc(${width/2}px - 50%)` : reduced.matches ? '3px' : width+'px'
+        const end = fixed || reduced.matches ? start : '-100%'
+        const animation = node.animate([
+          {transform: `translate(${start}, ${y}px)`},
+          {transform: `translate(${end}, ${y}px)`},
+        ], {duration, fill:'both'})
+        // Sample the media clock, including pauses, rate changes and seeks.
+        animation.pause()
+        sprite = {node, animation, layout, lane}
         sprites.set(item.id, sprite)
       }
-      sprite.style.color = settings.color
-      sprite.style.fontSize = settings.size + 'px'
-      const progress = age / duration
-      const x = reduced.matches ? '3px' : `calc(${width * (1 - progress)}px - ${progress * 100}%)`
-      sprite.style.transform = `translate(${x}, ${i % lanes * pitch}px)`
+      sprite.animation.currentTime = age
     }
     ink.style.opacity = String(settings.opacity / 100)
-    for (const [key, sprite] of sprites) if (!visible.has(key)) { sprite.remove(); sprites.delete(key) }
+    for (const [key, sprite] of sprites) if (!visible.has(key)) { sprite.animation.cancel(); sprite.node.remove(); sprites.delete(key) }
   }
   function tick() {
     draw()
@@ -189,13 +246,16 @@ export function startReplay(video: HTMLVideoElement, r: Recording) {
   return {
     async send(content: string) {
       if (!loggedIn()) { openAccount(); el('account').querySelector('.result')!.textContent = '登录后可发送回放弹幕'; return false }
-      const item = await api<Item>(endpoint, 'POST', {content, video_offset_ms: Math.floor(video.currentTime * 1000)})
+      const item = await api<Item>(endpoint, 'POST', {content, ...sendStyle(), video_offset_ms: Math.floor(video.currentTime * 1000)})
       if (scope.signal.aborted) return false
       merge([item])
       return true
     },
     stop() {
       scope.abort()
+      chart.hidden = true
+      chart.querySelector('output')!.value = ''
+      svg.onclick = svg.onmousemove = svg.onkeydown = null
       for (const timer of retryTimers) clearTimeout(timer)
       cancelAnimationFrame(frame)
       rate.onchange = null

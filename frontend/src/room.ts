@@ -4,7 +4,7 @@ import {base, room, session, selectSession, run, type Order, type Controls} from
 import {loadAccount} from './account'
 import {activePins, broadcastGift} from './gifts'
 import {actions, state, roomInfo} from './staff'
-import {enqueue, removeMessage, resetOverlay} from './danmaku'
+import {sendStyle, enqueue, removeMessage, resetOverlay} from './danmaku'
 import {replayLibrary, startReplay} from './replay'
 import {playRoom} from './player'
 // The gateway exports these numeric discriminants from internal/protocol/message.go.
@@ -22,6 +22,8 @@ interface ProtocolTypes {
 }
 
 interface DanmakuMessage {
+  color?: string
+  mode?: string
   nickname?: string
   id: number
   room_id: string
@@ -61,7 +63,7 @@ type ServerPacket = JournalEvent
   | Packet<'ready', { server_time_ms: number }>
   | Packet<'migrate', Record<string, never>>
 interface Recovery { events: JournalEvent[]; pos: string; reset: boolean }
-interface PendingSend { started: number; data: { client_msg_id: string; content: string } }
+interface PendingSend { started: number; data: ReturnType<typeof sendStyle> & { client_msg_id: string; content: string } }
 
 const receiptText = new Map([
   ['accepted', '弹幕已发布'],
@@ -145,13 +147,19 @@ document.getElementById('backLive')!.onclick = () => {
   play()
 }
 play()
-void roomInfo().then(info => {
-  if (info.role === 'moderator' || info.role === 'owner') {
+async function refreshRole() {
+  document.body.classList.remove('staff')
+  document.getElementById('staffOpen')!.hidden = true
+  document.getElementById('moderation-panel')!.hidden = false
+  ui.messages.querySelectorAll('.row-actions').forEach(group => group.remove())
+  await roomInfo()
+  if (!document.getElementById('staffOpen')!.hidden) {
     ui.messages.querySelectorAll<HTMLElement>('small[data-event]').forEach(user => {
-      if (!user.querySelector('.row-actions')) user.append(actions(user.dataset.event!,Number(user.dataset.uid)))
+      user.querySelector('.row-actions')?.remove()
+      user.append(actions(user.dataset.event!,Number(user.dataset.uid)))
     })
   }
-}).catch(() => {})
+}
 void run(activePins)
 ui.fullscreen.onclick = () => {
   if (document.fullscreenElement) void document.exitFullscreen()
@@ -281,19 +289,24 @@ async function json<T>(url: string, options: RequestInit): Promise<T> {
 }
 let connecting = false
 let retryTimer: number | undefined
+let generation = 0
 async function connect() {
+  const auth = generation
   if (connecting) return
   clearTimeout(retryTimer)
   connecting = true
   const path = base
   try {
     const sessionInfo = await json<{ user_id: number }>('/api/session', { method: 'POST', signal: AbortSignal.timeout(8000) })
-    if (path !== base) return
+    if (auth !== generation || path !== base) return
     if (userID !== sessionInfo.user_id && pendingSend) {
       pendingSend = null
       feedback('身份已变更，上一条的结果请查看近期弹幕')
     }
-    if (userID === null) void run(loadAccount)
+    if (userID === null) void run(async () => {
+      await loadAccount()
+      if (auth === generation) await refreshRole()
+    })
     userID = sessionInfo.user_id
     const ws = new WebSocket(
       location.origin.replace(/^http/, 'ws') + base + '/live?migrate=1',
@@ -314,7 +327,7 @@ async function connect() {
           base + '/recent?after=' + encodeURIComponent(after),
           { signal: AbortSignal.timeout(8000) },
         )
-        if (path !== base || ws.readyState !== WebSocket.OPEN || (promoted && socket !== ws)) return
+        if (auth !== generation || path !== base || ws.readyState !== WebSocket.OPEN || (promoted && socket !== ws)) return
         // The old socket can advance the cursor while the snapshot is in flight.
         // Apply only the suffix beyond that cursor, including across a stream reset.
         let events = res.events
@@ -378,7 +391,7 @@ async function connect() {
       apply(p, true)
     }
     ws.onmessage = ({ data }) => {
-      if (path !== base) { ws.close(); return }
+      if (auth !== generation || path !== base) { ws.close(); return }
       if (promoted && ws !== socket) return
       const parsed: ServerPacket | ServerPacket[] = JSON.parse(data)
       for (const p of Array.isArray(parsed) ? parsed : [parsed]) {
@@ -410,12 +423,12 @@ async function connect() {
     }
     ws.onclose = () => {
       clearTimeout(deadline)
-      if (path !== base || (promoted && socket !== ws)) return
+      if (auth !== generation || path !== base || (promoted && socket !== ws)) return
       if (!promoted) connecting = false
       reconnect()
     }
   } catch {
-    if (path !== base) return
+    if (auth !== generation || path !== base) return
     connecting = false
     reconnect()
   }
@@ -453,6 +466,7 @@ ui.compose.onsubmit = (e) => {
     data: {
       client_msg_id: crypto.randomUUID(),
       content: text,
+      ...sendStyle(),
     },
   }
   sendPending()
@@ -476,6 +490,18 @@ function wsOpen() {
 ui.like.onclick = () => {
   if (wsOpen()) socket?.send(JSON.stringify({ type: packetType.like, data: { count: 1 } }))
 }
+window.addEventListener('accountchange', () => {
+  generation++
+  socket?.close()
+  socket = undefined
+  ready = connecting = false
+  pendingSend = null
+  ui.connection.textContent = '连接中'
+  ui.connection.dataset.state = 'connecting'
+  controls()
+  void connect()
+  void run(refreshRole)
+})
 void connect()
 
 ui.moderation.onsubmit = async (e) => {

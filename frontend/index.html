@@ -37,14 +37,18 @@
       </div>
     </header>
     <main>
-      <h1 id="title">弹幕放映室</h1>
-      <p id="state"></p>
+      <div class="roomhead"><h1 id="title">弹幕放映室</h1>
+      <p id="state"></p><span id="roomTags"></span><button id="follow" hidden></button></div>
       <p id="notice"></p>
       <div id="combos" aria-live="polite"></div>
       <div id="pins"></div>
       <div class="layout">
         <section class="player" aria-label="放映区">
-          <div id="replayBar" hidden>
+          <div id="density" hidden>
+            <svg role="slider" aria-label="按弹幕密度定位回放" aria-valuemin="0" tabindex="0" viewBox="0 0 100 24" preserveAspectRatio="none">
+              <title></title><path class="area"/><path class="line"/><line y1="0" y2="24"/>
+            </svg><output></output>
+          </div><div id="replayBar" hidden>
             <strong id="replayTitle"></strong>
             <label>倍速 <select id="rate"><option>0.5</option><option selected>1</option><option>1.25</option><option>1.5</option><option>2</option></select> ×</label>
             <button id="backLive">返回直播</button>
@@ -85,8 +89,9 @@
           </details>
           <div class="composer">
             <form id="compose">
-              <input
-                id="message"
+              <select id="inkColor" aria-label="发送颜色"><option value="#ffffff">白色</option><option value="#34d399">薄荷</option><option value="#38bdf8">晴蓝</option><option value="#facc15">金黄</option><option value="#fb7185">珊瑚</option><option value="#c084fc">浅紫</option></select>
+              <select id="inkMode" aria-label="弹幕位置"><option value="scroll">滚动</option><option value="top">顶部</option><option value="bottom">底部</option></select>
+              <input id="message"
                 maxlength="500"
                 required
                 autocomplete="off"
@@ -166,7 +171,7 @@
         <form id="rename">
           <label>昵称<input name="nickname" maxlength="24" required /></label><button>保存昵称</button>
         </form>
-        <p id="balance"></p>
+        <p id="balance"></p><p id="earnings"></p>
         <button id="claim">每日签到领积分</button>
         <h3>模拟充值</h3>
         <form id="recharge"><select id="packages" name="package_code" aria-label="充值档位" required></select><button>创建充值单</button></form>
@@ -182,14 +187,25 @@
     </dialog>
     <dialog id="plaza" aria-label="直播广场">
       <div class="dialoghead">
-        <h2>直播广场</h2>
+        <h2>直播广场</h2><button id="createToggle" aria-controls="createBox" aria-expanded="false">+ 创建直播间</button>
         <button type="button" data-close>关闭</button>
       </div>
+      <section id="createBox" hidden>
+        <form id="create">
+          <label>房间标识<input name="slug" pattern="[a-zA-Z0-9_\-]{1,24}" required /></label
+          ><label>标题<input name="title" maxlength="100" required /></label
+          ><label>简介<input name="description" maxlength="1000" /></label
+          ><label>分区<select name="category" required></select></label>
+            <label>封面主题<select name="cover_theme"><option value="zinc">锌灰</option><option value="emerald">翡翠</option><option value="ocean">深海</option><option value="amber">琥珀</option><option value="violet">紫罗兰</option><option value="rose">玫瑰</option></select></label><label>标签（逗号分隔，最多 5 个）<input name="tags" /></label>
+            <label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
+          ><button>创建并进入</button>
+        </form>
+      </section>
       <select id="sort" aria-label="排序">
         <option value="recommend">推荐</option>
         <option value="hot" selected>热度</option>
         <option value="online">在线</option>
-        <option value="latest">最新</option>
+        <option value="following">我的关注</option><option value="latest">最新</option>
       </select>
       <select id="filter" aria-label="筛选">
         <option value="all">全部</option>
@@ -199,18 +215,7 @@
       <select id="strategy" aria-label="策略" hidden><option value="">自动分桶</option></select>
       <small id="effectiveStrategy"></small>
       <div id="rooms"></div>
-      <details id="createBox" hidden>
-        <summary>创建直播间</summary>
-        <form id="create">
-          <label>房间标识<input name="slug" pattern="[a-zA-Z0-9_\-]{1,24}" required /></label
-          ><label>标题<input name="title" maxlength="100" required /></label
-          ><label>简介<input name="description" maxlength="1000" /></label
-          ><label>分区<select name="category" required></select></label>
-            <label>标签（逗号分隔，最多 5 个）<input name="tags" /></label>
-            <label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
-          ><button>创建并进入</button>
-        </form>
-      </details>
+
       <p class="result" role="status"></p>
     </dialog>
     <dialog id="staff" aria-label="房管与看板">
@@ -232,7 +237,7 @@
           ><button>更新间隔</button>
         </form>
         <form id="muteForm">
-          <label>全员禁言<input name="mute_all" type="checkbox" /></label><button>保存禁言设置</button>
+          <label class="live-switch"><input name="mute_all" type="checkbox" role="switch" />全员禁言</label><button>保存禁言设置</button>
         </form>
         <section id="owner" hidden>
           <section aria-label="OBS 推流配置">
@@ -247,7 +252,7 @@
             <label>标题<input name="title" maxlength="100" required /></label
             ><label>简介<input name="description" maxlength="1000" /></label
             ><label>分区<select name="category" required></select></label>
-            <label>标签（逗号分隔，最多 5 个）<input name="tags" /></label>
+            <label>封面主题<select name="cover_theme"><option value="zinc">锌灰</option><option value="emerald">翡翠</option><option value="ocean">深海</option><option value="amber">琥珀</option><option value="violet">紫罗兰</option><option value="rose">玫瑰</option></select></label><label>标签（逗号分隔，最多 5 个）<input name="tags" /></label>
             <label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
             ><label>活动场次<input name="active_session" pattern="[a-zA-Z0-9_\-]{1,24}" required /></label
             ><label

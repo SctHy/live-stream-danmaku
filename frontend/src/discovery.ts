@@ -4,6 +4,18 @@ const sort = el<HTMLSelectElement>('sort'),
   filter = el<HTMLSelectElement>('filter')
 const category = el<HTMLSelectElement>('categoryFilter')
 const strategy = el<HTMLSelectElement>('strategy')
+import {loggedIn, openAccount} from './account'
+el('createToggle').onclick = () => {
+  if (!loggedIn()) return openAccount()
+  const box = el('createBox')
+  box.hidden = !box.hidden
+  el('createToggle').setAttribute('aria-expanded', String(!box.hidden))
+}
+window.addEventListener('accountchange', () => {
+  el('createBox').hidden = true
+  el('createToggle').setAttribute('aria-expanded','false')
+  if (el<HTMLDialogElement>('plaza').open) void run(plaza)
+})
 let version = 0
 async function plaza() {
   const current = ++version
@@ -15,11 +27,19 @@ async function plaza() {
     el<HTMLFormElement>('create').querySelector('select')!.replaceChildren(...categoryOptions(data))
   }
   strategy.hidden = sort.value !== 'recommend'
+  const following = sort.value === 'following'
+  category.hidden = filter.hidden = following
+  if (following && !loggedIn()) {
+    el('rooms').replaceChildren()
+    el('effectiveStrategy').textContent = ''
+    result('登录后可查看关注的主播')
+    return
+  }
   const params = new URLSearchParams({ sort: sort.value, status: filter.value })
   if (category.value) params.set('category', category.value)
   if (!strategy.hidden && strategy.value) params.set('strategy', strategy.value)
   const response = await api<{ rooms: (Room & { online: number; heat: number; recommend_reason: string })[]; degraded: boolean; strategy: string }>(
-    '/api/rooms?' + params,
+    following ? '/api/me/following' : '/api/rooms?' + params,
   )
   if (current !== version) return
   el('effectiveStrategy').textContent = strategy.hidden ? '' : '当前策略 · ' + response.strategy
@@ -29,11 +49,12 @@ async function plaza() {
       const meta = document.createElement('small')
       meta.textContent = [
         r.slug,
-        r.status === 'live' ? '直播中' : '已关播',
+
         r.online + ' 在线',
         '热度 ' + r.heat,
       ].join(' · ')
-      card.append(meta, document.createTextNode(r.description))
+      card.append(meta)
+      if (r.description) card.append(document.createTextNode(r.description))
       const name = data.categories.find(c => c.code === r.category)?.name
       if (name) {
         const badge = document.createElement('span')
@@ -43,7 +64,13 @@ async function plaza() {
       }
       const detail = document.createElement('small')
       detail.textContent = [...(r.tags || []).map(t => '#' + t), r.recommend_reason].filter(Boolean).join(' · ')
-      card.append(detail)
+      if (detail.textContent) card.append(detail)
+      const cover = document.createElement('span')
+      cover.className = 'cover'
+      cover.dataset.theme = r.cover_theme
+      cover.dataset.live = String(r.status === 'live')
+      cover.textContent = r.status === 'live' ? '直播中' : '已关播'
+      card.prepend(cover)
       return card
     }),
   )

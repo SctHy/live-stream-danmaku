@@ -20,6 +20,9 @@ export interface Controls {
 }
 export interface Room extends Controls {
   slug: string
+  follower_count: number
+  following: boolean
+  cover_theme: string
   category: string
   tags: string[]
   title: string
