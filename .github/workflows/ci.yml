@@ -67,6 +67,7 @@ jobs:
           --health-cmd "pg_isready -U danmaku -d danmaku_db"
           --health-interval 2s --health-timeout 2s --health-retries 15
     env:
+      DANMAKU_TEST_KAFKA_BROKERS: 127.0.0.1:9092
       DANMAKU_TEST_REDIS_ADDR: 127.0.0.1:6379
       DANMAKU_TEST_DATABASE_URL: postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable
     steps:
@@ -74,4 +75,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Start dedicated Kafka for OBS archive integration
+        run: |
+          docker compose up -d kafka
+          timeout 90 sh -c 'until docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list; do sleep 2; done'
       - run: go test -race -count=1 -timeout=15m -v ./...

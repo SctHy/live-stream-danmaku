@@ -13,7 +13,7 @@ Maku 基于 charlesAcmen 的 `live-stream-danmaku`，沿用 MIT 许可证，保�
 ```mermaid
 flowchart LR
     B[浏览器] <-->|实时推送 · WebSocket| G[Gateway 网关]
-    G -->|发送弹幕| L[Redis Lua 脚本]
+    G -->|按 Redis 活跃场次写入 video_offset_ms| L[Redis Lua 脚本]
     L -->|写入最近消息队列| S[(Redis Stream)]
     L -->|发布跨节点通知| R[Redis Pub/Sub]
     R -->|共享连接订阅| G
@@ -28,6 +28,12 @@ flowchart LR
     G -->|请求直播源| U[B 站直播 API]
     W[B 站弹幕 WebSocket] -->|同直播间共享连接| LB[internal/livebridge]
     LB -->|转发实时弹幕 · 108| G
+    OBS[OBS / ffmpeg] -->|RTMP| M[MediaMTX]
+    M -->|HLS| B
+    M -->|录制并封装 faststart MP4| V[(回放文件)]
+    M -->|开播与停播回调| G
+    V -->|HTTP Range 经网关| B
+    P -->|分片弹幕时间轴经网关| B
     B -->|FLV / HLS 播放| CDN[视频 CDN]
 ```
 
@@ -45,8 +51,9 @@ flowchart LR
 9. **直播广场。** Redis 按分钟写入热度 ZSET，合并最近 10 个分钟桶生成滚动热榜。网关分别缓存排序索引与房间详情，只批量补取缺失的详情，用 singleflight 合并同键并发回源。
 10. **虚拟积分与礼物。** 每日签到可领取积分。礼物与醒目留言在同一个 PostgreSQL 事务内创建订单、校验余额并条件扣款，以 `(sender_id, client_order_id)` 唯一约束防止重试重复扣款。订单投递后更新场次贡献榜，醒目留言按礼物档位限时置顶。
 11. **场次看板与历史检索。** 看板汇总当前及峰值在线、已归档弹幕、发言人数、撤回、管控和礼物数据。历史查询可组合关键词、发言人和 `before_id` 游标，翻页时继续过滤撤回记录。
+12. **OBS 直播与全量弹幕回放。** MediaMTX 接收 RTMP、提供 HLS 并录制 fMP4 分段，停播后合并为 faststart MP4。开播时网关将活跃场次写入 Redis，弹幕热路径按场次起点注入 `video_offset_ms`，无需查询 PostgreSQL。Archiver 批量归档后，回放页用 HTTP Range（206）读取视频，按 60 秒分片、用偏移量与记录 ID 的复合游标取完每片的可见弹幕，过滤已撤回记录。弹幕跟随视频时钟暂停、变速和跳转，点击时间轴上的弹幕可定位视频，登录后可在当前播放位置补发弹幕。
 
-**PostgreSQL 离线时**，只要 Redis 正常且网关未停机，实时弹幕、断线补发和 `/readyz` 仍可用。广场回退到 Redis 中的活跃房间，已有登录会话可读取身份（余额缺省），礼物目录和已有贡献榜仍可读取。注册、登录、修改资料、房间资料与授权、钱包签到与礼物订单、历史检索、审计和场次看板等依赖数据库的读写返回 503。配置的旧版房管密钥仍可禁言和解禁单个用户。数据库重连成功后，网关自动恢复业务。
+**PostgreSQL 离线时**，只要 Redis 正常且网关未停机，实时弹幕、断线补发和 `/readyz` 仍可用。广场回退到 Redis 中的活跃房间，已有登录会话可读取身份（余额缺省），礼物目录和已有贡献榜仍可读取。注册、登录、修改资料、房间资料与授权、钱包签到与礼物订单、历史检索、审计和场次看板等依赖数据库的读写返回 503。配置的旧版房管密钥仍可禁言和解禁单个用户。已缓存的 OBS 直播源仍可读取；推流密钥、开播鉴权及依赖场次记录的回放查询、播放与补发返回 503。数据库重连成功后，网关自动恢复业务。
 
 ## 性能测试结果
 
@@ -89,6 +96,14 @@ make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/api/rooms/{room}/stream-key` | 房主读取 OBS 服务器和推流码 |
+| POST | `/api/rooms/{room}/stream-key/rotate` | 房主轮换密钥，下次推流使用新码 |
+| GET | `/api/rooms/{room}/stream` | 返回直播源模式、直播状态与可用播放地址 |
+| GET | `/api/rooms/{room}/replays` | 本房间录制列表，按 `before_id` 翻页 |
+| GET / DELETE | `/api/rooms/{room}/replays/{replay_id}` | 查询详情；房主可删除回放 |
+| GET | `/api/replays/{replay_id}/video` | 读取 MP4，支持 HTTP Range |
+| GET / POST | `/api/rooms/{room}/replays/{replay_id}/danmaku` | 按 `[from_ms,to_ms)` 读取，分页续传 `after_offset_ms` 和 `after_id`；登录后提交 `content` 和 `video_offset_ms` |
+| POST | `/internal/stream/*` | MediaMTX 内部鉴权及开停播回调，Nginx 对外返回 403 |
 | POST | `/api/session` | 创建或复用访客身份，返回 `user_id`，并通过 HttpOnly Cookie 保存会话 |
 | POST | `/api/auth/register`、`/api/auth/login`、`/api/auth/logout` | 注册、登录或退出账号，登录态由 Cookie 保存 |
 | GET / PATCH | `/api/auth/me` | 读取当前身份，或修改已登录账号的昵称 |
@@ -124,7 +139,7 @@ maku/
 │   └── bench/          # 广播压测、冷热房间隔离、双网关迁移、阶梯容量与稳态压测工具
 ├── internal/
 │   ├── filter/         # Aho-Corasick 敏感词过滤与词库热更新
-│   ├── httpapi/        # HTTP/WebSocket、账号权限、广场缓存、礼物与看板、内嵌前端
+│   ├── httpapi/        # HTTP/WebSocket、账号权限、广场缓存、礼物与看板、OBS 回调、回放视频与弹幕 API、内嵌前端
 │   ├── hub/            # 房间连接管理、分片广播、批量合并发送、慢连接保护与平滑迁移
 │   ├── livebridge/     # B 站实时弹幕鉴权、共享连接与二进制帧解析
 │   ├── metrics/        # Prometheus 监控指标定义
@@ -132,11 +147,11 @@ maku/
 │   ├── protocol/       # WebSocket 消息格式与子协议常量
 │   ├── pubsub/         # Redis Lua 管控、共享订阅、热度分钟桶与场次贡献榜
 │   └── store/          # PostgreSQL 迁移、归档与检索、房间授权、钱包及订单事务
-├── frontend/           # 纯 TypeScript 前端（不依赖 React/Vue，仅引入 mpegts.js / hls.js）
+├── frontend/           # 直播与回放播放器，纯 TypeScript（不依赖 React/Vue，仅引入 mpegts.js / hls.js）
 ├── Dockerfile          # 构建网关与归档服务镜像
-├── deploy/             # Nginx 负载均衡与 Prometheus 采集配置
+├── deploy/             # Nginx 负载均衡、MediaMTX 配置及录制钩子、Prometheus 采集配置
 ├── docs/               # 完整性能测试报告（benchmarks.md）
-└── scripts/            # 浏览器级断线补发与网关迁移验证脚本
+└── scripts/            # 浏览器级断线补发、网关迁移与回放验证脚本
 ```
 
 ## 快速开始
@@ -172,10 +187,32 @@ make run-gateway     # 终端 2：启动弹幕网关
 
 运行 `docker compose logs -f nginx`，多次刷新页面，通过日志中的 `upstream=` 查看各请求命中的网关。要观察连接迁移，可让多个标签页进入同一房间，在另一终端运行 `docker compose stop gateway-a`，观察原先连到 gateway-a 的客户端重连并继续收发弹幕。运行 `docker compose start gateway-a` 恢复双网关。
 
+### OBS 推流与直播回放
+
+1. 停止占用相同端口的本地服务，在同一终端运行以下命令。媒体环境包含双网关、归档服务、Nginx 与 MediaMTX。再次部署时沿用同一回调密钥。
+
+   ```sh
+   export STREAM_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+   make up-media   # docker compose --profile media --profile cluster up -d --build
+   ```
+
+2. 打开 `http://127.0.0.1:8080/`，登录并创建房间。在「房管与看板」复制服务器地址和推流码，分别填入 OBS「设置 → 直播 → 自定义」的服务器和串流密钥，开始推流。
+3. 也可用带 libx264 的 ffmpeg 代替 OBS。将下方房间名和完整推流码换成自己的值，命令会发送带时间码的测试画面和音频，默认 30 秒后自动停播。`RTMP_URL` 可覆盖服务器地址。
+
+   ```sh
+   make demo-obs-stream ROOM=myroom STREAM_KEY='myroom?key=复制的密钥' SECONDS=60
+   ```
+
+4. 在直播间观看 HLS 并发几条弹幕。停止推流，待录制处理完成后，在房间打开「直播回放」并选择本场录制，可点弹幕跳转或在播放处补发。体验结束后运行 `make down` 停止全部服务，录制保留在命名卷中。
+
 ## 常用配置
 
 | 分类 | 配置项 | 默认值与说明 |
 | --- | --- | --- |
+| OBS 推流 | `OBS_RTMP_URL` | 房主看到的服务器地址，默认 `rtmp://127.0.0.1:1935/live` |
+| OBS 播放 | `OBS_HLS_BASE_URL` | HLS 根路径，默认 `/hls`，由 Nginx 转发 |
+| 录制存储 | `REPLAY_STORAGE_DIR` | 本机默认 `./data/replays`，Compose 使用共享卷 `/replays` |
+| 媒体回调 | `STREAM_WEBHOOK_SECRET` | 媒体环境必须设置，网关和 MediaMTX 共用；本机留空时开停播回调仅允许回环地址 |
 | 中间件 | `REDIS_ADDR` / `KAFKA_BROKERS` | `127.0.0.1:6379` / `127.0.0.1:9092`（多个地址用逗号分隔） |
 | 数据库 | `DATABASE_URL` | 本机 PostgreSQL 5432 端口的 `danmaku_db`，默认账号密码与 Compose 一致 |
 | 房管 | `DANMAKU_MOD_ROOM` / `DANMAKU_MOD_TOKEN` | 同时配置房间名和密钥后可调用房管接口 |
@@ -217,3 +254,9 @@ go run ./cmd/bench migration -gateway /tmp/maku-gateway -viewers 24 -batch 4 -in
 ```
 
 设置 `DANMAKU_TEST_REDIS_ADDR` 和 `DANMAKU_TEST_DATABASE_URL` 可开启 Redis/PostgreSQL 集成测试；跨网关重试测试需配置 `DANMAKU_TEST_GATEWAY_A`、`DANMAKU_TEST_GATEWAY_B` 并运行 Archiver（设置 `DANMAKU_MOD_ROOM=retry` 和对应密钥可一并测试房管分支）。浏览器端到端验证脚本见 [check-migration.cjs](scripts/check-migration.cjs) 和 [check-recovery.cjs](scripts/check-recovery.cjs)。
+
+OBS 归档集成测试还需设置 `DANMAKU_TEST_KAFKA_BROKERS`，指向没有其他 Archiver 消费的专用 Kafka。浏览器回放验证可在安装 Playwright 和 Chromium 后运行以下命令。使用专用网关直连端口；预先在其录制目录放置至少 125 秒的测试 MP4，并沿用该网关的回调密钥。[回放验证脚本](scripts/check-replay.cjs)
+
+```sh
+GATEWAY_ORIGIN=http://127.0.0.1:8081 REPLAY_FIXTURE=test.mp4 node scripts/check-replay.cjs
+```

@@ -1,12 +1,27 @@
-.PHONY: up up-monitoring up-cluster down run-gateway run-archiver test bench-fanout
+.PHONY: up up-monitoring up-cluster up-media demo-obs-stream down run-gateway run-archiver test bench-fanout
 up:
 	docker compose up -d
 up-monitoring:
 	docker compose --profile monitoring up -d
 up-cluster:
 	docker compose --profile cluster up -d --build
+up-media:
+	docker compose --profile media --profile cluster up -d --build
+
+RTMP_URL ?= rtmp://127.0.0.1:1935/live
+SECONDS ?= 30
+demo-obs-stream: export DEMO_SECONDS := $(SECONDS)
+demo-obs-stream: export RTMP_URL := $(RTMP_URL)
+demo-obs-stream:
+	@set -eu; : "$${ROOM:?set ROOM}" "$${STREAM_KEY:?set STREAM_KEY}"; \
+	key=$${STREAM_KEY#"$$ROOM?key="}; \
+	ffmpeg -hide_banner -loglevel warning -nostdin -re -f lavfi -i 'testsrc=size=640x360:rate=25:decimals=2' \
+		-f lavfi -i 'sine=frequency=440:sample_rate=44100' -t "$$DEMO_SECONDS" \
+		-c:v libx264 -preset veryfast -pix_fmt yuv420p -g 50 -c:a aac -f flv \
+		"$${RTMP_URL%/}/$$ROOM?key=$$key"
+
 down:
-	docker compose --profile monitoring --profile cluster down
+	docker compose --profile monitoring --profile cluster --profile media down
 run-gateway:
 	go run ./cmd/gateway $(ARGS)
 run-archiver:
