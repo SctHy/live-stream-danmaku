@@ -4,6 +4,10 @@ Maku 是一个分布式实时弹幕系统，拆分为两个独立服务：**Gate
 
 HTTP 路由和日志直接使用 Go 标准库 `net/http.ServeMux` 和 `log/slog`。整个 Go 项目只引入 5 个核心第三方库：`gorilla/websocket`、`go-redis/v9`、`franz-go`、`pgx/v5`、`prometheus/client_golang`。
 
+## 来源与改造范围
+
+Maku 基于 charlesAcmen 的 `live-stream-danmaku`，沿用 MIT 许可证，保留上游版权及 SctHy 的修改署名。项目扩展了带游标、回执和批量帧的 WebSocket 协议，通过共享订阅、分片广播和有界发送队列隔离慢连接，并支持停机迁移。归档端在数据持久化后提交 Kafka 位点，网关将实时服务与 PostgreSQL 可用性解耦。前端使用纯 TypeScript 实现直播播放和断线补发，评估体系覆盖对照实验、容量与稳态压测及回归门禁。[许可证](LICENSE)
+
 ## 系统架构
 
 ```mermaid
@@ -30,30 +34,41 @@ flowchart LR
 
 1. **一次 Redis 脚本调用搞定防重、限流和排序。** 房间名和场次拼成逻辑房间 ID，相关的 Redis 键统一带 `{room}` 标签，兼容 Redis Cluster 同槽执行。Lua 脚本先按访客和 `client_msg_id` 去重（10 分钟内重复提交直接返回原来的 `event_id`）；通过禁言和限流检查后，在同一次执行里把弹幕写入 Redis Stream（供断线补发）并发布到 Pub/Sub（通知其他网关广播）。广播消息直接嵌入原始 JSON 文本，避免 Lua 重新编解码导致 64 位整数（`uint64`）精度丢失。
 2. **平时单条直发，高并发时自动批量合并发送。** 默认用 8 条共享 Redis 订阅连接复用所有活跃房间，32 个后台工作协程按房间分片处理，广播时使用只读的成员快照避免长时间加锁。只有当本机同一房间支持批量协议（`danmaku.batch.v1`）的观众达到 128 人，且相邻弹幕间隔 ≤ 2 ms 时，才会开启 5 ms 的合并窗口（每批最多 32 条或 32 KiB），普通客户端仍按单条接收。每个连接有独立的发送队列（默认最多 512 帧 / 256 KiB），连续 8 次写不进去就会主动断开慢连接，防止拖垮整个房间。
-3. **同一套消息位置标记（游标）解决断线重连和不停服发布。** 浏览器会比对收到的 `prev` 和本地记录的游标，一旦发现漏消息，就带上 `epoch@stream-id` 调用 `recent` 接口补发（Redis Stream 保留约 256 条，120 秒无新消息后过期；游标太旧时直接拉最新快照重置）。网关收到 `SIGTERM` 停机信号后，会先把 `/readyz` 改为返回 503 让入口不再分配新连接，再分批通知在线客户端迁移（限制同时迁移人数）。客户端自动建立新连接并补收漏掉的消息，接管完成后关闭旧连接；最后网关关闭 HTTP 服务并把 Kafka 缓冲区里的消息全部发完再退出。
+3. **同一套消息位置标记（游标）解决断线重连和不停服发布。** 浏览器会比对收到的 `prev` 和本地记录的游标，一旦发现漏消息，就带上 `epoch@stream-id` 调用 `recent` 接口补发（Redis Stream 保留约 256 条，120 秒无新消息后过期；游标太旧时直接拉最新快照重置）。网关收到 `SIGTERM` 停机信号后，会先把 `/readyz` 改为返回 503 让入口不再分配新连接，再分批通知在线客户端迁移（限制同时迁移人数）。客户端自动建立新连接并补收漏掉的消息，接管完成后关闭旧连接；最后网关关闭 HTTP 服务并在退出前限时刷新 Kafka 缓冲区。
 4. **可安全重试的批量写库与高效历史分页。** Kafka 生产端采用 `LeaderAck`。Archiver 按分区消费后，通过 PostgreSQL 的 `UNNEST` 数组参数批量插入数据库，靠 `ON CONFLICT (event_id) DO NOTHING` 忽略重复消息。遇到网络抖动等临时错误会按随机退避自动重试；遇到数据格式或约束错误（SQLSTATE 22/23）则降级成逐条写入，把无法处理的坏数据记入死信日志和监控指标。等整批写入成功后再提交消费位点，停机时会额外等待最多 3 秒完成最后一次提交。历史弹幕查询走 `(room_id, id DESC)` 索引按 `before_id` 向下翻页，并用 `NOT EXISTS` 过滤已撤回的弹幕，避免传统 `OFFSET` 翻页越往后越慢。
 5. **高性能敏感词过滤与防重复请求外部接口。** 敏感词过滤使用 Aho-Corasick 多模式匹配算法，并通过 `atomic.Pointer` 无锁读取词库；收到 `SIGHUP` 信号时在后台构建好新词库再一次性替换，未命中敏感词时做到 0 内存分配。解析 B 站直播流地址使用独立 HTTP 客户端（6 秒超时），同一房间的并发请求会自动合并成一次外部调用，避免瞬间把上游接口打爆；结果缓存上限 512 项（开播缓存 15 秒，未开播缓存 5 秒），视频流本身由浏览器直连 CDN。
-6. **区分实时回执、历史归档和计数统计。** 客户端收到 `accepted` 表示弹幕已写入 Redis 并开始广播；写入 Kafka 属于异步步骤，极端情况下（进程突然崩溃或发送缓冲区满）可能丢失少量历史记录。在线人数和点赞数先在网关内存里汇总，再定期同步到 Redis 合并，因此页面展示的是最终一致的统计值。
+6. **区分实时回执、历史归档和计数统计。** 新弹幕的 `accepted` 表示 Redis 已写入恢复流并发布广播，重复提交返回原事件 ID。此回执只确认实时接收，Kafka 异步投递在队列满、投递失败或进程崩溃时可能丢失，历史记录因此可能缺项。在线人数定期汇总，点赞数为近似最终一致统计，网关崩溃可能丢失未同步的增量，Redis 已执行但应答丢失时重试可能重复计数。
 7. **按直播间共享 B 站实时弹幕连接。** 网关通过 `internal/livebridge` 缓存 B 站签名密钥和 `buvid3`，同一数字直播间只维持一条上游 WebSocket 连接，所有观众共享，最后一位观众离开后自动断开。解析时限制 zlib 解压后的最大体积防内存撑爆；B 站弹幕以消息类型 `108` 实时下发，仅用于页面展示，不计入本地恢复游标，也不写入 Kafka 和 PostgreSQL。
 
 ## 性能测试结果
 
-测试环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。profile 为 `full`，每个 arm 预热后保留 5 轮，表中为各轮中位数。
+基线采于 2026-11-25T12:00:15.613601Z，`git_sha: f29748d9ed7acba06cfe1b4942daceabb9f572f9`，`dirty: false`。环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。`full` 模式下每组预热后测量 5 轮，表中为中位数。
 
 | 实验与负载 | 对照组 → 处理组 | 指标 | 对照中位数 | 处理中位数 | Gate |
 | --- | --- | --- | ---: | ---: | --- |
-| 自适应批合并 high | legacy → adaptive_batch | frames | 313600 | 103712 | PASS |
-| 慢连接隔离  | baseline_single_shard_unbounded → protected_default | rss_peak_bytes | 70189056 | 48103424 | PASS |
-| 双网关迁移  | crash → bounded | recent_peak_qps | 300 | 80 | PASS |
-| 迁移排空  | crash → bounded | drain_ms | 454 | 1905.344 | PASS |
-| 深分页 page_3600 | offset_baseline → cursor_before_id_prod | p50_us | 162105.792 | 552.792 | PASS |
-| 归档写入 batch_128 | row_by_row_tx → unnest_prod | rows_per_second | 4489.995356916848 | 80562.93349781599 | PASS |
-| 敏感词扫描 words_20000 | naive_contains → ac_prod | miss_us | 137.23083 | 1.31166 | PASS |
-| Redis 去重 2ms | multi_cmd_baseline → lua_evalsha_prod | race_duplicate_rate | 0.21875 | 0 | PASS |
-| 直播源请求合并 burst_120 | direct_no_coalesce → prod_singleflight_cache | cold_upstream_calls | 120 | 1 | PASS |
+| 自适应批合并 high | legacy → adaptive_batch | `frames` | 313600 | 99680 | PASS |
+| 热房延迟 high | legacy → adaptive_batch | `hot_p99_us` | 4385 | 9984 | PASS |
+| 分片隔离 | single_shard → default_shards | `cold_p99_us` | 3741 | 3646 | PASS |
+| 分片隔离 | single_shard → default_shards | `danmaku_dropped_messages_total{reason="client_full"}` | 0 | 0 | PASS |
+| 分片隔离 | single_shard → default_shards | `danmaku_kicked_slow_clients_total` | 0 | 0 | PASS |
+| 慢连接踢除 | kick_disabled → kick_enabled | `cold_p99_us` | 3413 | 3325 | PASS |
+| 慢连接踢除 | kick_disabled → kick_enabled | `danmaku_dropped_messages_total{reason="client_full"}` | 11992 | 32 | PASS |
+| 慢连接踢除 | kick_disabled → kick_enabled | `danmaku_kicked_slow_clients_total` | 0 | 4 | PASS |
+| 迁移补发峰值 | crash → bounded | `recent_peak_qps` | 340 | 80 | PASS |
+| 迁移排空 | crash → bounded | `drain_ms` | 453 | 1907.667 | PASS |
+| 深分页 page_3600 | offset_baseline → cursor_before_id_prod | `p50_us` | 155210.083 | 383.959 | PASS |
+| 归档写入 batch_128 | row_by_row_tx → multivalue_insert | `rows_per_second` | 6291.176410054454 | 93155.55362516547 | PASS |
+| 归档写入 batch_128 | row_by_row_tx → unnest_prod | `rows_per_second` | 6291.176410054454 | 103448.51943428337 | PASS |
+| 敏感词扫描 words_20000 | naive_contains → ac_prod | `miss_us` | 137.0575 | 1.47125 | PASS |
+| Redis 去重 2ms | multi_cmd_baseline → lua_evalsha_prod | `race_duplicate_rate` | 0.21875 | 0 | PASS |
+| 直播源请求合并 burst_120 | direct_no_coalesce → prod_singleflight_cache | `cold_upstream_calls` | 120 | 1 | PASS |
+
+每批 128 行时，多值 INSERT 和 UNNEST 的吞吐分别约为逐行写入的 14.81 倍和 16.44 倍。主要收益来自批量化，两种批写方式之间相差约 11%。UNNEST 的工程价值是每批固定使用 5 个绑定参数，多值 INSERT 的参数数目随行数增长。
+
+单机 loopback 上，512 到 1024 名热房观众之间出现延迟拐点，热房 P99 从 4535 升至 11611 µs，各档均无漏收。另一次 3 分钟持续压测中，热房正常观众收齐 5529600 条投递，累计踢除 24 个慢连接，末两次采样 RSS 持平，goroutine 全程采样为 332–333 个。[阶梯容量报告](evaluation/capacity.json) · [稳态报告](evaluation/soak.json)
 
 ```sh
-export REDIS_ADDR=127.0.0.1:26379
+export REDIS_ADDR=127.0.0.1:${REDIS_PORT:-6379}
 export DATABASE_URL='postgres://danmaku:danmaku@127.0.0.1:5432/danmaku_db?sslmode=disable'
 make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 ```
@@ -73,7 +88,7 @@ make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 | POST | `/api/rooms/{room}/{session}/moderate` | 房管操作（校验同源、房间权限和 Bearer 密钥）：按 `event_id` 撤回弹幕，或按 `user_id` 禁言指定秒数 |
 | GET | `/api/live/playurl?room_id=6` | 查询 B 站数字直播间开播状态与可用播放地址 |
 | GET | `/livez` | 进程存活检查（Gateway 与 Archiver 均提供） |
-| GET | `/readyz` | 服务就绪检查（Gateway 检查停机状态与 Redis；Gateway 在 PostgreSQL 故障期间继续提供实时服务，历史查询和撤回返回 503，数据库恢复后自动重试；Archiver 检查 PostgreSQL；未就绪返回 503） |
+| GET | `/readyz` | 服务就绪检查（Gateway 只检查停机状态与 Redis。PostgreSQL 离线时 Gateway 仍可启动并提供实时服务，历史查询和撤回返回 503，后台重连成功后自动恢复。Archiver 仍检查 PostgreSQL；未就绪返回 503） |
 | GET | `/metrics` | Prometheus 监控指标（Gateway 复用主端口；Archiver 需通过 `-metrics-addr` 显式开启） |
 
 ## 项目结构
@@ -83,7 +98,7 @@ maku/
 ├── cmd/
 │   ├── gateway/        # 实时弹幕网关启动入口
 │   ├── archiver/       # Kafka -> PostgreSQL 异步归档启动入口
-│   └── bench/          # 广播压测、冷热房间隔离、双网关迁移测试工具
+│   └── bench/          # 广播压测、冷热房间隔离、双网关迁移、阶梯容量与稳态压测工具
 ├── internal/
 │   ├── filter/         # Aho-Corasick 敏感词过滤与词库热更新
 │   ├── httpapi/        # HTTP/WebSocket 路由、访客会话、直播源解析与内嵌前端静态文件
@@ -147,6 +162,8 @@ make run-gateway     # 终端 2：启动弹幕网关
 
 ## 监控与测试
 
+GitHub Actions 在 PR 或推送到 main 时检查 Go 格式，运行 vet、竞态测试并构建三个入口，另用 Redis 和 PostgreSQL 运行集成测试。[CI 配置](.github/workflows/ci.yml)
+
 网关暴露活跃连接数、活跃房间数、单条与批量发送帧数、分片排队耗时、队列丢弃数、慢连接断开数、拦截数及 Kafka 投递失败数；归档服务暴露写入行数、批写耗时与死信数。所有指标标签均使用固定枚举值，避免标签数量无限增长。
 
 ```sh
@@ -164,6 +181,8 @@ make test            # go test -race ./...
 # 启动中间件与服务后运行压测（migration 会自动拉起两台临时网关）
 make bench-fanout ARGS='-viewers 160 -rate 800 -seconds 4'
 go run ./cmd/bench rooms
+make bench-capacity
+make bench-soak
 go build -o /tmp/maku-gateway ./cmd/gateway
 go run ./cmd/bench migration -gateway /tmp/maku-gateway -viewers 24 -batch 4 -inflight 2
 ```
