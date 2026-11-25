@@ -47,8 +47,9 @@ return 1`)
 var pruneOnline = redis.NewScript(expireOnline + "return 1")
 
 type Activity struct {
-	Online int64   `json:"online"`
-	Heat   float64 `json:"heat"`
+	BusiestSession string  `json:"-"`
+	Online         int64   `json:"online"`
+	Heat           float64 `json:"heat"`
 }
 
 func (s *Store) Activity(ctx context.Context) (map[string]Activity, error) {
@@ -62,7 +63,7 @@ func (s *Store) Activity(ctx context.Context) (map[string]Activity, error) {
 		keys[i] = minuteKey(now.Add(-time.Duration(i) * time.Minute))
 	}
 	heat := p.ZUnionWithScores(ctx, redis.ZStore{Keys: keys})
-	online := p.ZRangeWithScores(ctx, onlineKeys[0], 0, -1)
+	sessions := p.ZRevRangeWithScores(ctx, onlineKeys[1], 0, -1)
 	if _, err := p.Exec(ctx); err != nil {
 		return nil, err
 	}
@@ -70,10 +71,13 @@ func (s *Store) Activity(ctx context.Context) (map[string]Activity, error) {
 	for _, z := range heat.Val() {
 		out[z.Member.(string)] = Activity{Heat: z.Score}
 	}
-	for _, z := range online.Val() {
-		slug := z.Member.(string)
+	for _, z := range sessions.Val() {
+		slug, session, _ := strings.Cut(z.Member.(string), "/")
 		a := out[slug]
-		a.Online = int64(z.Score)
+		if a.BusiestSession == "" {
+			a.BusiestSession = session
+		}
+		a.Online += int64(z.Score)
 		a.Heat += z.Score
 		out[slug] = a
 	}

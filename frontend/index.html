@@ -12,10 +12,24 @@
       <div class="bar">
         <a class="brand" href="/"><i aria-hidden="true"></i>Maku</a>
         <form id="join">
-          <label>房间<input name="room" title="房间名或 B 站直播间号" required maxlength="24" pattern="[a-zA-Z0-9_\-]+" /></label>
-          <label>场次<input name="session" required maxlength="24" pattern="[a-zA-Z0-9_\-]+" /></label>
+          <label
+            >房间<input
+              id="room"
+              name="room"
+              title="房间名或 B 站直播间号"
+              required
+              maxlength="24"
+              pattern="[a-zA-Z0-9_\-]+"
+          /></label>
+          <label
+            >场次<input id="session" name="session" required maxlength="24" pattern="[a-zA-Z0-9_\-]+"
+          /></label>
           <button>进入房间</button>
         </form>
+        <nav>
+          <span id="identity">访客</span> <button id="accountOpen">登录 / 注册</button>
+          <button id="plazaOpen">直播广场</button> <button hidden id="staffOpen">房管与看板</button>
+        </nav>
         <div class="badges">
           <span id="connection" data-state="connecting" role="status">连接中</span>
           <span id="stats">在线 — · 赞 —</span>
@@ -23,7 +37,10 @@
       </div>
     </header>
     <main>
-      <h1>弹幕放映室</h1>
+      <h1 id="title">弹幕放映室</h1>
+      <p id="state"></p>
+      <p id="notice"></p>
+      <div id="pins"></div>
       <div class="layout">
         <section class="player" aria-label="放映区">
           <div class="screen">
@@ -32,16 +49,43 @@
           </div>
           <div class="toolbar">
             <span id="source-status" role="status">本地弹幕</span>
-            <label class="live-switch" hidden><input id="live-comments" type="checkbox" role="switch" checked />B 站弹幕</label>
+            <label class="live-switch" hidden
+              ><input id="live-comments" type="checkbox" role="switch" checked />B 站弹幕</label
+            >
             <button id="fullscreen" type="button">全屏</button>
           </div>
           <details id="settings">
             <summary>弹幕设置</summary>
             <div class="fields"></div>
           </details>
+          <details>
+            <summary>送礼物 / 醒目留言</summary>
+            <form id="giftForm">
+              <select id="gift" aria-label="礼物"></select
+              ><input
+                type="number"
+                id="quantity"
+                aria-label="数量"
+                min="1"
+                max="99"
+                value="1"
+                required
+              /><input hidden id="sc" maxlength="120" placeholder="醒目留言" aria-label="醒目留言" /><button>
+                赠送
+              </button>
+            </form>
+          </details>
           <div class="composer">
             <form id="compose">
-              <input id="message" maxlength="500" required autocomplete="off" aria-label="弹幕内容" placeholder="写一条弹幕…" disabled />
+              <input
+                id="message"
+                maxlength="500"
+                required
+                autocomplete="off"
+                aria-label="弹幕内容"
+                placeholder="写一条弹幕…"
+                disabled
+              />
               <button id="send" disabled>发送</button>
               <button type="button" id="like" disabled>赞 +1</button>
             </form>
@@ -52,16 +96,150 @@
         <aside aria-labelledby="heading">
           <h2 id="heading">实时弹幕</h2>
           <ol id="messages"></ol>
+          <details id="rank">
+            <summary>贡献榜</summary>
+            <ol id="contributors"></ol>
+          </details>
+          <details id="history">
+            <summary>历史弹幕</summary>
+            <form id="search">
+              <input name="q" maxlength="64" aria-label="搜索弹幕" placeholder="搜索弹幕" /><button>
+                搜索</button
+              ><button type="button" id="clearSearch">清空</button>
+            </form>
+            <ol id="past"></ol>
+            <button id="moreHistory" hidden>更早弹幕</button>
+          </details>
           <details id="moderation-panel">
             <summary>房管操作</summary>
             <form id="moderation">
               <label>房管密钥<input id="modKey" type="password" autocomplete="off" required /></label>
-              <label>弹幕<select id="target" required><option value="">选择一条弹幕</option></select></label>
+              <label
+                >弹幕<select id="target" required>
+                  <option value="">选择一条弹幕</option>
+                </select></label
+              >
               <div><button value="withdraw">撤回</button> <button value="mute">禁言 60 秒</button></div>
             </form>
           </details>
         </aside>
       </div>
     </main>
+    <dialog id="account" aria-label="账号与钱包">
+      <div class="dialoghead">
+        <h2>账号与钱包</h2>
+        <button type="button" data-close>关闭</button>
+      </div>
+      <form id="auth">
+        <label
+          >用户名<input
+            name="username"
+            minlength="3"
+            maxlength="24"
+            autocomplete="username"
+            required /></label
+        ><label
+          >密码<input
+            name="password"
+            type="password"
+            minlength="6"
+            maxlength="72"
+            required
+            autocomplete="current-password" /></label
+        ><button value="login">登录</button><button>注册</button>
+      </form>
+      <section id="wallet" hidden>
+        <form id="rename">
+          <label>昵称<input name="nickname" maxlength="24" required /></label><button>保存昵称</button>
+        </form>
+        <p id="balance"></p>
+        <button id="claim">每日签到领积分</button>
+        <h3>近期消费</h3>
+        <ul id="orders"></ul>
+        <button id="logout">退出登录</button>
+      </section>
+      <p class="result" role="status"></p>
+    </dialog>
+    <dialog id="plaza" aria-label="直播广场">
+      <div class="dialoghead">
+        <h2>直播广场</h2>
+        <button type="button" data-close>关闭</button>
+      </div>
+      <select id="sort" aria-label="排序">
+        <option value="hot">热度</option>
+        <option value="online">在线</option>
+        <option value="latest">最新</option>
+      </select>
+      <select id="filter" aria-label="筛选">
+        <option value="all">全部</option>
+        <option value="live">直播中</option>
+      </select>
+      <div id="rooms"></div>
+      <details id="createBox" hidden>
+        <summary>创建直播间</summary>
+        <form id="create">
+          <label>房间标识<input name="slug" pattern="[a-zA-Z0-9_\-]{1,24}" required /></label
+          ><label>标题<input name="title" maxlength="100" required /></label
+          ><label>简介<input name="description" maxlength="1000" /></label
+          ><label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
+          ><button>创建并进入</button>
+        </form>
+      </details>
+      <p class="result" role="status"></p>
+    </dialog>
+    <dialog id="staff" aria-label="房管与看板">
+      <div class="dialoghead">
+        <h2>房管与看板</h2>
+        <button type="button" data-close>关闭</button>
+      </div>
+      <nav>
+        <button data-tab="control">房间管控</button><button data-tab="audit">禁言与审计</button
+        ><button data-tab="analytics">场次看板</button>
+      </nav>
+      <section id="control">
+        <form id="noticeForm">
+          <label>置顶公告<input name="notice" maxlength="1000" /></label><button>更新公告</button>
+        </form>
+        <form id="slowForm">
+          <label
+            >慢速模式（秒）<input name="slow_mode_seconds" type="number" min="0" max="300" required /></label
+          ><button>更新间隔</button>
+        </form>
+        <form id="muteForm">
+          <label>全员禁言<input name="mute_all" type="checkbox" /></label><button>保存禁言设置</button>
+        </form>
+        <section id="owner" hidden>
+          <form id="editRoom">
+            <label>标题<input name="title" maxlength="100" required /></label
+            ><label>简介<input name="description" maxlength="1000" /></label
+            ><label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
+            ><label>活动场次<input name="active_session" pattern="[a-zA-Z0-9_\-]{1,24}" required /></label
+            ><label
+              >开播状态<select name="status">
+                <option value="live">直播中</option>
+                <option value="offline">已关播</option>
+              </select></label
+            ><button>保存房间信息</button>
+          </form>
+          <form id="grant">
+            <label>用户名<input name="username" required /></label><button>任命房管</button>
+          </form>
+          <ul id="mods"></ul>
+        </section>
+      </section>
+      <section id="audit" hidden>
+        <h3>有效禁言</h3>
+        <ul id="mutes"></ul>
+        <h3>操作日志</h3>
+        <ol id="logs"></ol>
+        <button hidden id="moreLogs">更早记录</button>
+      </section>
+      <section id="analytics" hidden>
+        <div id="metrics"></div>
+        <h3>贡献榜</h3>
+        <ol id="top"></ol>
+      </section>
+      <p class="result" role="status"></p>
+    </dialog>
   </body>
 </html>

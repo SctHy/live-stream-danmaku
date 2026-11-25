@@ -262,7 +262,6 @@ func (c *plazaCache) getDetails(ctx context.Context, ranks []rank, load func([]s
 				v.Slug = slug
 				v.Title = slug
 				v.Status = "live"
-				v.ActiveSession = "live"
 			}
 			found[slug] = v
 			if c.generation == generation {
@@ -342,6 +341,12 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 			room.Slug = v.Slug
 			room.Title = v.Slug
 			room.Status = v.Status
+		}
+		if room.ActiveSession == "" {
+			room.ActiveSession = v.BusiestSession
+			if room.ActiveSession == "" {
+				room.ActiveSession = "live"
+			}
 		}
 		rooms = append(rooms, summary{room, v.Activity, idx.Degraded})
 	}

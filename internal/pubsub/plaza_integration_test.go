@@ -39,7 +39,7 @@ func TestActivityWindowAndSessionTotals(t *testing.T) {
 		t.Fatal(err)
 	}
 	activity, err := s.Activity(ctx)
-	if err != nil || activity[slug] != (Activity{Online: 5, Heat: 17}) {
+	if err != nil || activity[slug] != (Activity{Online: 5, Heat: 17, BusiestSession: "two"}) {
 		t.Fatal(activity[slug], err)
 	}
 }

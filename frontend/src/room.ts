@@ -1,4 +1,9 @@
 import './settings'
+import './discovery'
+import {base, room, session, run, type Order, type Controls} from './business'
+import {loadAccount} from './account'
+import {activePins, showGift} from './gifts'
+import {actions, state, roomInfo} from './staff'
 import {enqueue, removeMessage, resetOverlay} from './danmaku'
 import {playRoom} from './player'
 // The gateway exports these numeric discriminants from internal/protocol/message.go.
@@ -10,10 +15,13 @@ interface ProtocolTypes {
   withdraw: 105
   ready: 106
   liveDanmaku: 108
+  roomState: 109
+  gift: 110
   migrate: 107
 }
 
 interface DanmakuMessage {
+  nickname?: string
   id: number
   room_id: string
   event_id: string
@@ -41,6 +49,8 @@ interface Packet<K extends keyof ProtocolTypes, D> {
 }
 type JournalEvent = { pos: string; prev: string } & (
   | Packet<'danmaku', DanmakuMessage>
+  | Packet<'roomState', Controls>
+  | Packet<'gift', Order>
   | Packet<'withdraw', { event_id: string }>
 )
 type ServerPacket = JournalEvent
@@ -57,6 +67,8 @@ const receiptText = new Map([
   ['invalid', '内容无效'],
   ['muted', '当前已禁言'],
   ['rate_limited', '发送过快'],
+  ['room_muted', '全员禁言中'],
+  ['slow_mode', '慢速模式已开启，请稍后再发送'],
   ['filtered', '内容包含敏感词'],
 ])
 
@@ -83,19 +95,25 @@ const ui = {
   moderation: document.querySelector<HTMLFormElement>('#moderation')!,
   modKey: document.querySelector<HTMLInputElement>('#modKey')!,
 }
-const params = new URLSearchParams(location.search)
-const room = params.get('room') || '6'
-const session = params.get('session') || 'screening-01'
 ui.join.querySelector<HTMLInputElement>('[name=room]')!.value = room
 ui.join.querySelector<HTMLInputElement>('[name=session]')!.value = session
-const base = '/api/rooms/' + [room, session].map(encodeURIComponent).join('/')
 const { video } = ui
 const listLimit = 100
-if (/^\d+$/.test(room)) {
+function play(source: string) {
   ui.liveComments.labels![0].hidden = false
   video.hidden = false
-  playRoom(video, room, text => { ui.sourceStatus.textContent = text })
+  playRoom(video, source, text => { ui.sourceStatus.textContent = text })
 }
+void roomInfo().then(info => {
+  if (info.role === 'moderator' || info.role === 'owner') {
+    ui.messages.querySelectorAll<HTMLElement>('small[data-event]').forEach(user => {
+      if (!user.querySelector('.row-actions')) user.append(actions(user.dataset.event!,Number(user.dataset.uid)))
+    })
+  }
+  const source = info.bilibili_room_id || (/^\d+$/.test(room) ? room : '')
+  if (source) play(source)
+}).catch(() => { if (/^\d+$/.test(room)) play(room) })
+void run(activePins)
 ui.fullscreen.onclick = () => {
   if (document.fullscreenElement) void document.exitFullscreen()
   else document.querySelector('.screen')!.requestFullscreen().catch(() => feedback('浏览器未允许全屏'))
@@ -155,9 +173,14 @@ function appendRow(d: SidebarMessage) {
     badge.textContent = 'B站'
     user.append(badge, document.createTextNode(d.user_name))
   } else {
-    user.textContent = '观众 ' + d.user_id
+    user.textContent = d.nickname || '观众 ' + d.user_id
+    user.dataset.uid = String(d.user_id)
+    user.dataset.event = d.event_id
+    if (!document.getElementById('staffOpen')!.hidden) user.append(actions(d.event_id,d.user_id))
   }
-  item.append(user, document.createTextNode(d.content))
+  const content = document.createElement('span')
+  content.textContent = d.content
+  item.append(user, content)
   ui.messages.prepend(item)
   if ('user_id' in d) {
     const option = new Option(d.content.slice(0, 28), d.event_id)
@@ -190,6 +213,8 @@ function apply(p: JournalEvent, animate: boolean) {
       feedback('弹幕已送达')
     }
   }
+  if (p.type === packetType.roomState) state(p.data)
+  if (p.type === packetType.gift) showGift(p.data)
   cursor = p.pos
 }
 function older(a: string, b: string) {
@@ -217,6 +242,7 @@ async function connect() {
       pendingSend = null
       feedback('身份已变更，上一条的结果请查看近期弹幕')
     }
+    if (userID === null) void run(loadAccount)
     userID = sessionInfo.user_id
     const ws = new WebSocket(
       location.origin.replace(/^http/, 'ws') + base + '/live?migrate=1',
