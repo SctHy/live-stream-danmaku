@@ -22,7 +22,7 @@ func NewMessageRepo(db *pgxpool.Pool) *MessageRepo {
 }
 
 // SaveBatch inserts one partition batch atomically. The PostgreSQL driver encodes
-// arrays as five bind parameters regardless of batch size.
+// arrays as a fixed number of bind parameters regardless of batch size.
 func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMessage) (int64, error) {
 	if len(msgs) == 0 {
 		return 0, nil
@@ -33,7 +33,9 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 	contents := make([]string, len(msgs))
 	names := make([]string, len(msgs))
 	times := make([]time.Time, len(msgs))
+	offsets := make([]*int64, len(msgs))
 	for i, msg := range msgs {
+		offsets[i] = msg.VideoOffsetMS
 		ids[i] = msg.EventID
 		rooms[i] = msg.RoomID
 		// NUMERIC(20,0) also accepts user IDs above PostgreSQL's signed BIGINT range.
@@ -42,11 +44,11 @@ func (r *MessageRepo) SaveBatch(ctx context.Context, msgs []*protocol.DanmakuMes
 		names[i] = msg.Nickname
 		times[i] = msg.SendTime
 	}
-	tag, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time,nickname)
- SELECT id, room, uid::numeric, body, sent,nickname
- FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[],$6::text[])
- AS batch(id, room, uid, body, sent,nickname)
- ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times, names)
+	tag, err := r.db.Exec(ctx, `INSERT INTO danmaku_messages (event_id, room_id, user_id, content, send_time,nickname,video_offset_ms)
+ SELECT id, room, uid::numeric, body, sent,nickname,video_offset_ms
+ FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::timestamptz[],$6::text[], $7::bigint[])
+ AS batch(id, room, uid, body, sent,nickname,video_offset_ms)
+ ON CONFLICT (event_id) DO NOTHING`, ids, rooms, users, contents, times, names, offsets)
 	return tag.RowsAffected(), err
 }
 

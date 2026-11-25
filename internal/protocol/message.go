@@ -31,19 +31,20 @@ type WsPacket struct {
 
 // DanmakuMessage is a persisted event and the WebSocket chat payload.
 type DanmakuMessage struct {
-	Nickname    string    `json:"nickname,omitempty"`
-	ClientMsgID string    `json:"client_msg_id,omitempty"`
-	EventID     string    `json:"event_id,omitempty"`
-	ID          uint64    `json:"id"`
-	RoomID      string    `json:"room_id"`
-	UserID      uint64    `json:"user_id"`
-	Content     string    `json:"content"`
-	SendTime    time.Time `json:"send_time"`
+	VideoOffsetMS *int64    `json:"video_offset_ms,omitempty"`
+	Nickname      string    `json:"nickname,omitempty"`
+	ClientMsgID   string    `json:"client_msg_id,omitempty"`
+	EventID       string    `json:"event_id,omitempty"`
+	ID            uint64    `json:"id"`
+	RoomID        string    `json:"room_id"`
+	UserID        uint64    `json:"user_id"`
+	Content       string    `json:"content"`
+	SendTime      time.Time `json:"send_time"`
 }
 
 // FitsHistory checks the PostgreSQL text limits before publishing or batching.
 func (d DanmakuMessage) FitsHistory() bool {
-	return utf8.RuneCountInString(d.RoomID) <= 50 && utf8.RuneCountInString(d.Content) <= 500 &&
+	return (d.VideoOffsetMS == nil || *d.VideoOffsetMS >= 0) && utf8.RuneCountInString(d.RoomID) <= 50 && utf8.RuneCountInString(d.Content) <= 500 &&
 		utf8.RuneCountInString(d.Nickname) <= 24 && !strings.ContainsRune(d.Nickname, 0) &&
 		!strings.ContainsRune(d.RoomID, 0) && !strings.ContainsRune(d.Content, 0) && !strings.ContainsRune(d.EventID, 0)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/httpapi"
 	"github.com/scthy/maku/internal/hub"
 	"github.com/scthy/maku/internal/mq"
@@ -26,7 +27,8 @@ import (
 	"github.com/scthy/maku/internal/store"
 )
 
-func TestAccountRoomLifecycle(t *testing.T) {
+func accountServer(t *testing.T, run func(*testing.T, context.Context, *gatewayHistory, *historyPool, *pubsub.Store, *http.ServeMux, *httpapi.ChatHandler, *httptest.Server)) {
+	t.Helper()
 	dsn, addr := os.Getenv("DANMAKU_TEST_DATABASE_URL"), os.Getenv("DANMAKU_TEST_REDIS_ADDR")
 	if dsn == "" || addr == "" {
 		t.Skip("requires PostgreSQL and Redis")
@@ -61,11 +63,11 @@ func TestAccountRoomLifecycle(t *testing.T) {
 	h.current.Store(pool)
 	rs := pubsub.Open(addr)
 	defer rs.Close()
-	producer, e := mq.NewProducer(mq.Brokers(""), slog.Default(), nil)
+	producer, e := mq.NewProducer(mq.Brokers(os.Getenv("DANMAKU_TEST_KAFKA_BROKERS")), slog.Default(), nil)
 	if e != nil {
 		t.Fatal(e)
 	}
-	m := hub.New(hub.Config{Producer: producer, Store: rs, RoomShards: 1, PubSubShards: 1})
+	m := hub.New(hub.Config{Filter: filter.New([]string{"replay-blocked-word"}), Producer: producer, Store: rs, RoomShards: 1, PubSubShards: 1})
 	go m.Start()
 	defer func() { drain, stop := context.WithTimeout(t.Context(), time.Second); defer stop(); m.Drain(drain) }()
 	mux := http.NewServeMux()
@@ -73,6 +75,14 @@ func TestAccountRoomLifecycle(t *testing.T) {
 	handler.Routes(mux)
 	server := httptest.NewServer(mux)
 	defer server.Close()
+	run(t, ctx, h, pool, rs, mux, handler, server)
+}
+func TestAccountRoomLifecycle(t *testing.T) {
+	accountServer(t, checkAccountRoomLifecycle)
+}
+
+func checkAccountRoomLifecycle(t *testing.T, ctx context.Context, h *gatewayHistory, pool *historyPool, rs *pubsub.Store, mux *http.ServeMux, handler *httpapi.ChatHandler, server *httptest.Server) {
+	addr := os.Getenv("DANMAKU_TEST_REDIS_ADDR")
 	type response struct {
 		body   map[string]json.RawMessage
 		cookie *http.Cookie

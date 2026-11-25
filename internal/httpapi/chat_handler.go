@@ -53,15 +53,16 @@ type sessionStore interface {
 	RefreshLogin(context.Context, string, pubsub.Login) error
 }
 type ChatHandler struct {
-	history  HistoryStore
-	manager  *hub.Hub
-	sessions sessionStore
-	allowDev bool
-	plaza    plazaCache
+	liveResolver *liveResolver
+	history      HistoryStore
+	manager      *hub.Hub
+	sessions     sessionStore
+	allowDev     bool
+	plaza        plazaCache
 }
 
 func NewChatHandler(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool) *ChatHandler {
-	return &ChatHandler{history: history, manager: m, sessions: sessions, allowDev: allowDev}
+	return &ChatHandler{liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
 }
 
 func (h *ChatHandler) Routes(mux *http.ServeMux) {
@@ -82,7 +83,7 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 		http.ServeFileFS(w, r, assets, "web/index.html")
 	})
 
-	mux.HandleFunc("GET /api/live/playurl", newLiveResolver("https://api.live.bilibili.com", nil).serve)
+	mux.HandleFunc("GET /api/live/playurl", h.liveResolver.serve)
 	mux.HandleFunc("POST /api/session", h.session)
 	h.businessRoutes(mux)
 	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/rooms/{room}/{session}/history": h.listHistory, "GET /api/rooms/{room}/{session}/live": h.live, "GET /api/rooms/{room}/{session}/recent": h.recent, "POST /api/rooms/{room}/{session}/moderate": h.moderate} {

@@ -128,6 +128,8 @@ func checkDegradedRoutes(t *testing.T, mux *http.ServeMux) {
 		method, path, body string
 		want               int
 	}{
+		{"GET", "/api/rooms/r/replays", "", 503},
+		{"GET", "/api/rooms/r/stream-key", "", 503},
 		{"GET", "/api/rooms/r/s/history", "", 503},
 		{"POST", "/api/rooms/r/s/moderate", `{"action":"withdraw","event_id":"12345678901234567890123456"}`, 503},
 		{"GET", "/api/rooms/r/s/recent", "", 200},

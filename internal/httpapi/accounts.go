@@ -40,7 +40,20 @@ func (h *ChatHandler) db() *pgxpool.Pool {
 }
 func (h *ChatHandler) businessRoutes(mux *http.ServeMux) {
 	routes := map[string]http.HandlerFunc{
-		"GET /api/rooms": h.square, "GET /api/gifts/catalog": giftCatalog,
+		"POST /internal/stream/auth":               h.streamAuth,
+		"POST /internal/stream/ready":              h.streamHook,
+		"POST /internal/stream/ended":              h.streamHook,
+		"GET /api/rooms/{room}/stream-key":         h.streamKey,
+		"POST /api/rooms/{room}/stream-key/rotate": h.streamKey,
+		"GET /api/rooms/{room}/stream":             h.stream,
+		"GET /api/rooms/{room}/replays":            h.replays,
+		// The session wildcard lets existing literal history and live routes take precedence.
+		"GET /api/rooms/{room}/{session}/{id}":        h.replays,
+		"DELETE /api/rooms/{room}/replays/{id}":       h.replays,
+		"GET /api/replays/{id}/video":                 h.video,
+		"GET /api/rooms/{room}/replays/{id}/danmaku":  h.timeline,
+		"POST /api/rooms/{room}/replays/{id}/danmaku": h.timeline,
+		"GET /api/rooms":                              h.square, "GET /api/gifts/catalog": giftCatalog,
 		"GET /api/wallet": h.wallet, "POST /api/wallet/checkin": h.wallet,
 		"GET /api/rooms/{room}/{session}/gifts": h.gifts, "POST /api/rooms/{room}/{session}/gifts": h.gifts,
 		"GET /api/rooms/{room}/{session}/leaderboard": h.leaderboard, "GET /api/rooms/{room}/{session}/analytics": h.analytics,

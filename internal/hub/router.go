@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/scthy/maku/internal/protocol"
+	"github.com/scthy/maku/internal/pubsub"
 )
 
 func (m *Hub) reply(c *Client, id, status string) {
@@ -80,6 +81,24 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		return
 	}
 	msg := protocol.DanmakuMessage{Nickname: c.nickname, EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
+	room, session, _ := strings.Cut(c.RoomID, "/")
+	if strings.HasPrefix(session, "obs-") {
+		if obs, ok := m.store.(interface {
+			OBS(context.Context, string) (pubsub.OBSStream, error)
+		}); ok {
+			ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
+			active, err := obs.OBS(ctx, room)
+			cancel()
+			if err != nil {
+				m.reply(c, input.ClientMsgID, "unavailable")
+				return
+			}
+			if active.RoomID == c.RoomID {
+				offset := max(int64(0), msg.SendTime.UnixMilli()-active.Started)
+				msg.VideoOffsetMS = &offset
+			}
+		}
+	}
 	body, err := json.Marshal(msg)
 	if err != nil {
 		m.log.Error("Encode WebSocket packet", "error", err)

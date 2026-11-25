@@ -111,6 +111,22 @@ func (h *ChatHandler) deliver(ctx context.Context, slug string, a pendingAudit) 
 	var data any
 	kind := protocol.TypeRoomState
 	switch a.Action {
+	case "obs_state":
+		var v obsEvent
+		if err := json.Unmarshal([]byte(a.Detail), &v); err != nil {
+			return err
+		}
+		cache, ok := h.sessions.(obsStore)
+		if !ok {
+			return errors.New("OBS store unavailable")
+		}
+		if err := cache.SetOBS(ctx, slug, v.Stream); err != nil {
+			return err
+		}
+		if err := h.sessions.SetControls(ctx, slug, v.RoomControls); err != nil {
+			return err
+		}
+		data = v
 	case "create_room":
 		if err := h.sessions.SetControls(ctx, slug, protocol.RoomControls{Status: "live"}); err != nil {
 			return err

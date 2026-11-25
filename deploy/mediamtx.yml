@@ -1,0 +1,23 @@
+rtmp: true
+rtmpAddress: :1935
+hls: true
+hlsAddress: :8888
+hlsVariant: fmp4
+rtsp: false
+webrtc: false
+srt: false
+moq: false
+authMethod: http
+authHTTPAddress: http://gateway-a:8080/internal/stream/auth
+runOnDisconnect: /hook disconnect
+
+paths:
+  "~^live/[A-Za-z0-9_-]{1,24}$":
+    overridePublisher: false
+    record: yes
+    recordFormat: fmp4
+    recordPath: /capture/%path/%Y-%m-%d_%H-%M-%S-%f_%z
+    recordSegmentDuration: 5m
+    recordDeleteAfter: 0s
+    runOnOnline: /hook online
+    runOnOffline: /hook offline
