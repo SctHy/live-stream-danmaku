@@ -47,17 +47,19 @@ flowchart LR
 6. **区分实时回执、历史归档和计数统计。** 新弹幕的 `accepted` 表示 Redis 已写入恢复流并发布广播，重复提交返回原事件 ID。此回执只确认实时接收，Kafka 异步投递在队列满、投递失败或进程崩溃时可能丢失，历史记录因此可能缺项。在线人数定期汇总，点赞数为近似最终一致统计，网关崩溃可能丢失未同步的增量，Redis 已执行但应答丢失时重试可能重复计数。
 7. **按直播间共享 B 站实时弹幕连接。** 网关通过 `internal/livebridge` 缓存 B 站签名密钥和 `buvid3`，同一数字直播间只维持一条上游 WebSocket 连接，所有观众共享，最后一位观众离开后自动断开。解析时限制 zlib 解压后的最大体积防内存撑爆；B 站弹幕以消息类型 `108` 实时下发，仅用于页面展示，不计入本地恢复游标，也不写入 Kafka 和 PostgreSQL。
 
-8. **账号与多房间授权。** Redis 保存登录会话，PostgreSQL 按房间区分房主、房管和观众。房主任免房管，房主与房管可撤回弹幕、禁言和更新公告。Redis Lua 在接收弹幕时统一执行全员禁言和慢速模式，跨网关生效。
-9. **直播广场。** Redis 按分钟写入热度 ZSET，合并最近 10 个分钟桶生成滚动热榜。网关分别缓存排序索引与房间详情，只批量补取缺失的详情，用 singleflight 合并同键并发回源。
+8. **账号与多房间授权。** Redis 保存登录会话，PostgreSQL 按房间区分房主、房管和观众。房主任免房管，房主与房管可撤回弹幕、禁言和更新公告。Redis Lua 在接收弹幕时统一执行全员禁言和慢速模式，跨网关生效。登录用户可按房间关注主播，关注列表优先展示直播中的房间。
+9. **直播广场。** 网关在本地按房间聚合弹幕热度，定期刷入 Redis 分钟桶。读取活跃度时，用一次 Pipeline 清理过期在线记录、合并最近 10 个热度桶并读取在线人数。网关分别缓存排序索引与房间详情，只批量补取缺失的详情，用 singleflight 合并同键并发回源。
 10. **虚拟积分与礼物。** 每日签到可领取积分。礼物与醒目留言在同一个 PostgreSQL 事务内创建订单、校验余额并条件扣款，以 `(sender_id, client_order_id)` 唯一约束防止重试重复扣款。订单投递后更新场次贡献榜，醒目留言按礼物档位限时置顶。
 11. **场次看板与历史检索。** 看板汇总当前及峰值在线、已归档弹幕、发言人数、撤回、管控和礼物数据。历史查询可组合关键词、发言人和 `before_id` 游标，翻页时继续过滤撤回记录。
-12. **OBS 直播与全量弹幕回放。** MediaMTX 接收 RTMP、提供 HLS 并录制 fMP4 分段，停播后合并为 faststart MP4。开播时网关将活跃场次写入 Redis，弹幕热路径按场次起点注入 `video_offset_ms`，无需查询 PostgreSQL。Archiver 批量归档后，回放页用 HTTP Range（206）读取视频，按 60 秒分片、用偏移量与记录 ID 的复合游标取完每片的可见弹幕，过滤已撤回记录。弹幕跟随视频时钟暂停、变速和跳转，点击时间轴上的弹幕可定位视频，登录后可在当前播放位置补发弹幕。
+12. **OBS 直播与全量弹幕回放。** MediaMTX 接收 RTMP、提供 HLS 并录制 fMP4 分段，停播后合并为 faststart MP4。开播时网关将活跃场次写入 Redis，弹幕热路径按场次起点注入 `video_offset_ms`，无需查询 PostgreSQL。Archiver 批量归档后，回放页用 HTTP Range（206）读取视频，按 60 秒分片、用偏移量与记录 ID 的复合游标取完每片的可见弹幕，过滤已撤回记录。弹幕跟随视频时钟暂停、变速和跳转，点击时间轴上的弹幕可定位视频，登录后可在当前播放位置补发弹幕。直播与回放均支持自选颜色及滚动、顶部或底部固定样式。回放查询将分片时间范围下推至 SQL，高能曲线按时间桶统计可见弹幕，点击曲线可跳转。
+
+WebSocket 登录身份、OBS 活跃场次和回放视频文件路径使用有容量上限的短 TTL 本地缓存，减少重复身份查询、场次读取和 Range 请求的数据库查询。
 
 **PostgreSQL 离线时**，只要 Redis 正常且网关未停机，实时弹幕、断线补发和 `/readyz` 仍可用。广场回退到 Redis 中的活跃房间，已有登录会话可读取身份（余额缺省），礼物目录和已有贡献榜仍可读取。注册、登录、修改资料、房间资料与授权、钱包签到与礼物订单、历史检索、审计和场次看板等依赖数据库的读写返回 503。配置的旧版房管密钥仍可禁言和解禁单个用户。已缓存的 OBS 直播源仍可读取；推流密钥、开播鉴权及依赖场次记录的回放查询、播放与补发返回 503。数据库重连成功后，网关自动恢复业务。
 
 ## 可插拔扩展架构
 
-- **礼物与账本**　`internal/commerce` 通过 `CatalogProvider` 提供目录，按商品的 `effect_type` 从注册表选择 `GiftEffect`。新增商品可直接配置目录；新增效果可实现 `Prepare` 并在启动时注册。签到、充值、兑换和送礼都在事务内更新余额并追加 `wallet_ledger`，以用户、业务类型和业务标识保证重复请求只记一次账。
+- **礼物与账本**　`internal/commerce` 通过 `CatalogProvider` 提供目录，按商品的 `effect_type` 从注册表选择 `GiftEffect`。新增商品可直接配置目录；新增效果可实现 `Prepare` 并在启动时注册。签到、充值、兑换和送礼都在事务内更新余额并追加 `wallet_ledger`，以用户、业务类型和业务标识保证重复请求只记一次账。给其他主播送礼时，事务按用户 ID 升序锁定双方账户，避免相互送礼时形成死锁。发送人扣款和主播收益同时入账，主播获得礼物总价的 70%（向下取整），收益与可用余额分别记录。
 - **支付渠道**　`PaymentProvider` 封装建单和回调验签。内置 `sandbox` 支持模拟支付或关单，`voucher` 支持兑换码入账。接入新支付渠道时，实现 `Name`、`Create`、`VerifyWebhook` 并加入渠道注册表，即可复用充值单状态流转和账本结算。
 - **广场推荐**　`internal/recommend` 依次执行 Recall → Filter → Scorer → Reranker。召回阶段选出候选房间，过滤阶段按直播状态和分区筛选，评分阶段计算顺序与推荐理由，重排阶段可调整分区多样性。新增策略时注册需要的组件，再用 `RegisterStrategy` 按名称组合。前端读取策略列表，默认按用户分桶，也可手动指定策略。
 
@@ -84,7 +86,9 @@ flowchart LR
 | Redis 去重 2ms | multi_cmd_baseline → lua_evalsha_prod | `race_duplicate_rate` | 0.21875 | 0 | PASS |
 | 直播源请求合并 burst_120 | direct_no_coalesce → prod_singleflight_cache | `cold_upstream_calls` | 120 | 1 | PASS |
 
-每批 128 行时，多值 INSERT 和 UNNEST 的吞吐分别约为逐行写入的 14.81 倍和 16.44 倍。主要收益来自批量化，两种批写方式之间相差约 11%。UNNEST 的工程价值是每批固定使用 5 个绑定参数，多值 INSERT 的参数数目随行数增长。
+在干净提交 `cb37610` 上重跑 full（每组 5 轮），20 组不变式全部通过，但 15% 回归门禁未通过：慢连接踢除组冷房 P99 从 3,325 升至 23,071 µs，UNNEST 归档从 103,449 降至 72,870 行/秒。
+
+基线每批 128 行时，多值 INSERT 和 UNNEST 的吞吐分别约为逐行写入的 14.81 倍和 16.44 倍。主要收益来自批量化，两种批写方式之间相差约 11%。基线版本的 UNNEST 每批固定使用 5 个绑定参数；当前版本随消息字段扩展为 9 个，参数数目仍与批内行数无关。
 
 单机 loopback 上，512 到 1024 名热房观众之间出现延迟拐点，热房 P99 从 4535 升至 11611 µs，各档均无漏收。另一次 3 分钟持续压测中，热房正常观众收齐 5529600 条投递，累计踢除 24 个慢连接，末两次采样 RSS 持平，goroutine 全程采样为 332–333 个。[阶梯容量报告](evaluation/capacity.json) · [稳态报告](evaluation/soak.json)
 
@@ -107,15 +111,18 @@ make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 | GET | `/api/rooms/{room}/stream` | 返回直播源模式、直播状态与可用播放地址 |
 | GET | `/api/rooms/{room}/replays` | 本房间录制列表，按 `before_id` 翻页 |
 | GET / DELETE | `/api/rooms/{room}/replays/{replay_id}` | 查询详情；房主可删除回放 |
+| GET | `/api/rooms/{room}/replays/{replay_id}/density` | 按时间桶统计可见弹幕，`buckets` 默认 60，范围 10–120，返回桶宽、各桶计数及峰值 |
 | GET | `/api/replays/{replay_id}/video` | 读取 MP4，支持 HTTP Range |
-| GET / POST | `/api/rooms/{room}/replays/{replay_id}/danmaku` | 按 `[from_ms,to_ms)` 读取，分页续传 `after_offset_ms` 和 `after_id`；登录后提交 `content` 和 `video_offset_ms` |
+| GET / POST | `/api/rooms/{room}/replays/{replay_id}/danmaku` | 按 `[from_ms,to_ms)` 读取，分页续传 `after_offset_ms` 和 `after_id`；登录后提交 `content` 和 `video_offset_ms`，可附 `color` 和 `mode` |
 | POST | `/internal/stream/*` | MediaMTX 内部鉴权及开停播回调，Nginx 对外返回 403 |
 | POST | `/api/session` | 创建或复用访客身份，返回 `user_id`，并通过 HttpOnly Cookie 保存会话 |
 | POST | `/api/auth/register`、`/api/auth/login`、`/api/auth/logout` | 注册、登录或退出账号，登录态由 Cookie 保存 |
 | GET / PATCH | `/api/auth/me` | 读取当前身份，或修改已登录账号的昵称 |
 | GET | `/api/rooms` | 广场排序 `sort=hot/online/latest/recommend`，支持 `status=all/live`、`category` 分区及 `strategy` 策略；返回生效策略和各房间的推荐理由，`limit` 默认 20，上限 50 |
-| POST | `/api/rooms` | 登录后提交 `slug`、`title` 建房，可附简介、B 站房号、分区 `category` 及最多五个标签 `tags` |
-| GET / PATCH | `/api/rooms/{room}` | 查询资料与当前角色；房主可更新资料、当前场次、直播状态和管控设置 |
+| POST | `/api/rooms` | 登录后提交 `slug`、`title` 建房，可附简介、B 站房号、分区 `category`、封面主题 `cover_theme` 及最多五个标签 `tags` |
+| GET / PATCH | `/api/rooms/{room}` | 查询资料、角色、关注人数 `follower_count` 和本人关注状态 `following`；房主可更新封面主题 `cover_theme`、资料、当前场次、直播状态和管控设置 |
+| POST / DELETE | `/api/rooms/{room}/follow` | 登录后关注或取消关注该房间，成功返回 204 |
+| GET | `/api/me/following` | 返回本人关注的房间，优先展示直播中的房间 |
 | GET / POST | `/api/rooms/{room}/moderators` | 房主或房管查看名单；房主按用户名或用户 ID 任命 |
 | DELETE | `/api/rooms/{room}/moderators/{user_id}` | 房主解除任命 |
 | GET | `/api/rooms/{room}/{session}/mutes` | 查看本场次禁言名单 |
@@ -129,12 +136,12 @@ make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 | POST | `/api/payments/webhook/{provider}` | 渠道外部回调；sandbox 用原始请求体的 HMAC-SHA256 十六进制摘要校验 `X-Payment-Signature` |
 | POST | `/api/wallet/redeem` | 传 `code` 兑换积分，重复领取返回 `duplicate=true` |
 | GET | `/api/gifts/catalog` | 礼物编码、价格、效果类型与醒目留言置顶时长 |
-| GET | `/api/wallet` | 查询余额、今日签到状态、近期礼物单、充值单和资金流水 |
+| GET | `/api/wallet` | 查询可用余额、主播累计收益 `earnings`、今日签到状态、近期礼物单、充值单和资金流水 |
 | POST | `/api/wallet/checkin` | 每日签到，重复领取不增加余额 |
 | GET / POST | `/api/rooms/{room}/{session}/gifts` | 按 `limit` 查近期礼物与有效置顶；下单传 `client_order_id`、`gift_code`、`quantity` 和可选留言 `message`（醒目留言必填） |
 | GET | `/api/rooms/{room}/{session}/leaderboard` | 查询本场贡献榜前 20 名 |
 | GET | `/api/rooms/{room}/{session}/analytics` | 房主或房管查看场次看板 |
-| GET / WS | `/api/rooms/{room}/{session}/live` | WebSocket 实时通道：发送弹幕与点赞，接收弹幕、礼物、房间管控变更、统计和发送回执；支持 `?migrate=1` 迁移与 `danmaku.batch.v1` 批量协议 |
+| GET / WS | `/api/rooms/{room}/{session}/live` | WebSocket 实时通道：发送弹幕（可附颜色 `color` 和样式 `mode=scroll/top/bottom`）与点赞，接收弹幕、礼物、房间管控变更、统计和发送回执；支持 `?migrate=1` 迁移与 `danmaku.batch.v1` 批量协议 |
 | GET | `/api/rooms/{room}/{session}/recent` | 传入 `after`（消息游标），补发断线期间漏掉的弹幕，返回 `events`、`pos`、`reset` |
 | GET | `/api/rooms/{room}/{session}/history` | 按关键词 `q` 和发言人 `user_id` 可选过滤，按 ID 倒序查历史弹幕，`limit` 默认 50（上限 100），翻页传 `before_id=next_before_id` |
 | POST | `/api/rooms/{room}/{session}/moderate` | 同源请求，按房间角色或配置的 Bearer 密钥授权。`action` 支持 `withdraw`（event_id）、`mute/unmute`（user_id，禁言另传 seconds）、`mute_all`（enabled）、`slow_mode`（seconds，0 关闭）、`notice`（notice） |
@@ -162,12 +169,13 @@ maku/
 │   ├── mq/             # Kafka 生产者与批量消费者（含退避重试）
 │   ├── protocol/       # WebSocket 消息格式与子协议常量
 │   ├── pubsub/         # Redis Lua 管控、共享订阅、热度分钟桶与场次贡献榜
+│   ├── ttlcache/       # 有容量上限的进程内 TTL 缓存
 │   └── store/          # PostgreSQL 迁移、归档与检索、房间授权、钱包及订单事务
 ├── frontend/           # 直播与回放播放器，纯 TypeScript（不依赖 React/Vue，仅引入 mpegts.js / hls.js）
 ├── Dockerfile          # 构建网关与归档服务镜像
 ├── deploy/             # Nginx 负载均衡、MediaMTX 配置及录制钩子、Prometheus 采集配置
 ├── docs/               # 完整性能测试报告（benchmarks.md）
-└── scripts/            # 浏览器级断线补发、网关迁移与回放验证脚本
+└── scripts/            # 浏览器级断线补发、网关迁移、回放与房间交互验证脚本
 ```
 
 ## 快速开始
@@ -273,6 +281,8 @@ go run ./cmd/bench migration -gateway /tmp/maku-gateway -viewers 24 -batch 4 -in
 ```
 
 设置 `DANMAKU_TEST_REDIS_ADDR` 和 `DANMAKU_TEST_DATABASE_URL` 可开启 Redis/PostgreSQL 集成测试；跨网关重试测试需配置 `DANMAKU_TEST_GATEWAY_A`、`DANMAKU_TEST_GATEWAY_B` 并运行 Archiver（设置 `DANMAKU_MOD_ROOM=retry` 和对应密钥可一并测试房管分支）。浏览器端到端验证脚本见 [check-migration.cjs](scripts/check-migration.cjs) 和 [check-recovery.cjs](scripts/check-recovery.cjs)。
+
+在连接 Redis、PostgreSQL 和 Kafka 的专用网关上，设置 `GATEWAY_ORIGIN` 后运行 `node scripts/check-room-ux.cjs`，验证登录、房间封面、关注、送礼收益与彩色弹幕样式。脚本使用 Playwright 和 Chromium。[房间交互验证脚本](scripts/check-room-ux.cjs)
 
 OBS 归档集成测试还需设置 `DANMAKU_TEST_KAFKA_BROKERS`，指向没有其他 Archiver 消费的专用 Kafka。浏览器回放验证可在安装 Playwright 和 Chromium 后运行以下命令。使用专用网关直连端口；预先在其录制目录放置至少 125 秒的测试 MP4，并沿用该网关的回调密钥。[回放验证脚本](scripts/check-replay.cjs)
 
