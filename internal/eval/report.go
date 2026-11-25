@@ -153,6 +153,16 @@ func (e *Experiment) Measure(repeats int, run func(Arm, int) (RunSample, error))
 			if err != nil {
 				return fmt.Errorf("%s/%s round %d: %w", e.Name, a.Name, round, err)
 			}
+			if e.Name == "isolation_stalled" && e.Load == "slow_kick" {
+				drops := sample.Metrics[ClientFull]
+				kicks := sample.Metrics[Kicked]
+				wantKick := a.Name == "kick_enabled"
+				sample.Invariants = append(sample.Invariants, InvariantResult{
+					Name:   "stalled_backpressure_and_kick_policy",
+					Passed: drops > 0 && ((wantKick && kicks > 0) || (!wantKick && kicks == 0)),
+					Detail: fmt.Sprintf("client_full=%g kicked=%g", drops, kicks),
+				})
+			}
 			if round > 0 {
 				a.Runs = append(a.Runs, sample)
 			}

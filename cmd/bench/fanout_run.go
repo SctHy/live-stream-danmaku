@@ -38,11 +38,16 @@ func fanout(args []string) {
 	}
 }
 func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool, err error) {
+	return observedFanout(args, log, nil)
+}
+
+func observedFanout(args []string, log io.Writer, soak *soakMonitor) (result FanoutResult, jsonMode bool, err error) {
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
 	addr := flags.String("addr", "127.0.0.1:8080", "gateway address")
 	viewers := flags.Int("viewers", 1000, "hot-room connections")
 	rate := flags.Int("rate", 25, "hot-room messages per second")
 	seconds := flags.Int("seconds", 10, "sending duration")
+	padding := flags.Int("padding", 0, "extra hot-message CJK characters (0-450)")
 	legacy := flags.Bool("legacy", false, "use only legacy readers")
 	peer := flags.String("peer", "", "second gateway for alternating readers")
 	mixed := flags.Int("legacy-every", 0, "use the legacy frame protocol for every Nth reader")
@@ -71,6 +76,9 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 	if *peer == "" {
 		*peer = *addr
 	}
+	if *padding < 0 || *padding > 450 {
+		return result, jsonMode, fmt.Errorf("invalid padding")
+	}
 	if *mixed < 0 || *stalled < 0 || *rooms < 0 || *churn < 0 {
 		return result, jsonMode, fmt.Errorf("negative workload parameter")
 	}
@@ -85,8 +93,12 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 
 	coldCount := *coldRate * *seconds
 
+	var interval int
+	if soak != nil {
+		interval = soak.interval
+	}
 	var readers sync.WaitGroup
-	cold, err := connect(*addr, tag+"cold", coldCount, !*legacy, true, &readers)
+	cold, err := connect(*addr, tag+"cold", coldCount, interval**coldRate, !*legacy, true, &readers)
 	if err != nil {
 		return
 	}
@@ -100,7 +112,7 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 	}()
 	coldWriters := []*observer{cold}
 	for i := 1; i < (*coldRate+4)/5; i++ {
-		o, e := connect(*addr, tag+"cold", coldCount, !*legacy, false, &readers)
+		o, e := connect(*addr, tag+"cold", coldCount, interval**coldRate, !*legacy, false, &readers)
 		if e != nil {
 			return result, jsonMode, e
 		}
@@ -111,7 +123,7 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 	for i := range hot {
 		host := hosts[i%len(hosts)]
 		batch := !*legacy && (*mixed == 0 || (i+1)%*mixed != 0)
-		hot[i], err = connect(host, tag+"hot", n, batch, i < max(*sample, len(hosts)), &readers)
+		hot[i], err = connect(host, tag+"hot", n, interval**rate, batch, i < max(*sample, len(hosts)), &readers)
 		if err != nil {
 			return
 		}
@@ -123,7 +135,10 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 			return nil, e
 		}
 		if tcp, ok := c.UnderlyingConn().(*net.TCPConn); ok {
-			tcp.SetReadBuffer(1024)
+			if e := tcp.SetReadBuffer(1024); e != nil {
+				c.Close()
+				return nil, e
+			}
 		}
 		return c, nil
 	}
@@ -174,13 +189,31 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 	}()
 	time.Sleep(300 * time.Millisecond)
 	expected := n * *viewers
+	var monitorDone chan error
+	if soak != nil {
+		stop := make(chan struct{})
+		monitorDone = make(chan error, 1)
+		go func() {
+			monitorDone <- soak.monitor(stop, *seconds, func() (*websocket.Conn, error) { return idle("hot") })
+		}()
+		defer func() {
+			close(stop)
+			if monitorDone != nil {
+				err = errors.Join(err, <-monitorDone)
+			}
+		}()
+	}
 	var writers sync.WaitGroup
 	writers.Add(1)
 	var coldErr error
-	go func() { defer writers.Done(); coldErr = send(coldWriters, coldCount, *coldRate) }()
+	go func() { defer writers.Done(); coldErr = send(coldWriters, coldCount, *coldRate, "") }()
 	writersForHot := hot
 	sendStart := time.Now()
-	err = send(writersForHot, n, *rate)
+	suffix := ""
+	if *padding > 0 {
+		suffix = "/" + strings.Repeat("测", *padding)
+	}
+	err = send(writersForHot, n, *rate, suffix)
 	sendElapsed := time.Since(sendStart)
 	writers.Wait()
 	if err != nil {
@@ -188,6 +221,13 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 	}
 	if coldErr != nil {
 		return result, jsonMode, coldErr
+	}
+	if monitorDone != nil {
+		e := <-monitorDone
+		monitorDone = nil
+		if e != nil {
+			return result, jsonMode, e
+		}
 	}
 	deadline := time.Now().Add(*drain)
 	for time.Now().Before(deadline) {
@@ -210,6 +250,10 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 		o.conn.Close()
 	}
 	readers.Wait()
+	if soak != nil {
+		soak.delivery(hot, *rate, *seconds, "hot")
+		soak.delivery(coldWriters, *coldRate, *seconds, "cold")
+	}
 	total, frames := int64(0), 0
 	var payloadBytes int64
 	missing, duplicate, gaps, affected, worst := 0, 0, 0, 0, 0
@@ -275,6 +319,7 @@ func runFanout(args []string, log io.Writer) (result FanoutResult, jsonMode bool
 		"cold_samples":    float64(len(cold.latency)),
 		"hot_p50_us":      float64(percentile(latency, 50)),
 		"hot_p99_us":      float64(percentile(latency, 99)),
+		"cold_p50_us":     float64(percentile(cold.latency, 50)),
 		"cold_p99_us":     float64(percentile(cold.latency, 99)),
 		"frames":          float64(frames),
 		"received":        float64(total),

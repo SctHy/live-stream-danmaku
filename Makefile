@@ -30,3 +30,7 @@ eval-report:
 	go run ./cmd/bench eval report -in $(LEDGER) -md evaluation/report.md -html evaluation/report.html $(ARGS)
 eval-diff:
 	go run ./cmd/bench eval diff -baseline $(BASELINE) -candidate $(CANDIDATE) $(ARGS)
+
+.PHONY: bench-capacity bench-soak
+bench-capacity bench-soak:
+	go run ./cmd/bench $(patsubst bench-%,%,$@) $(ARGS)

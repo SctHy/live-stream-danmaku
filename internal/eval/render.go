@@ -18,7 +18,7 @@ var panels = []struct {
 	metrics    []string
 }{
 	{"fanout_sweep", "Batching can increase hot-room latency while reducing frames.", []string{"frames", "process_cpu_seconds_total", "hot_p50_us", "hot_p99_us"}},
-	{"isolation_stalled", "Bounded queues can disconnect stalled clients to limit resident memory.", []string{"rss_peak_bytes", "cold_p99_us"}},
+	{"isolation_stalled", "", []string{"rss_peak_bytes", "cold_p99_us", ClientFull, Kicked}},
 	{"migration_strategies", "Pacing handoffs spreads recovery requests and can extend drain time.", []string{"recent_peak_qps", "connect_peak_qps", "drain_ms"}},
 	{"history_pagination", "", []string{"p50_us"}},
 	{"pg_archive_write", "", []string{"rows_per_second"}},

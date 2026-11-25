@@ -102,3 +102,21 @@ func TestWarmupDiscarded(t *testing.T) {
 		t.Fatal(e, err, order)
 	}
 }
+
+func TestSlowKickGate(t *testing.T) {
+	for _, tc := range []struct {
+		arm          string
+		drops, kicks float64
+		pass         bool
+	}{
+		{"kick_enabled", 8, 1, true}, {"kick_enabled", 0, 1, false}, {"kick_enabled", 8, 0, false}, {"kick_disabled", 8, 0, true}, {"kick_disabled", 8, 1, false},
+	} {
+		e := Experiment{Name: "isolation_stalled", Load: "slow_kick", Arms: []Arm{{Name: tc.arm}}}
+		err := e.Measure(1, func(Arm, int) (RunSample, error) {
+			return RunSample{Metrics: map[string]float64{ClientFull: tc.drops, Kicked: tc.kicks}, Invariants: []InvariantResult{{Name: "delivery", Passed: true}}}, nil
+		})
+		if err != nil || e.Passed != tc.pass {
+			t.Fatal(tc, e.Passed, err)
+		}
+	}
+}

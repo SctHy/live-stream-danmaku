@@ -27,6 +27,11 @@ func main() {
 				fatalf("%v", err)
 			}
 			return
+		case "capacity", "soak":
+			if err := loadBench(os.Args[1], os.Args[2:]); err != nil {
+				fatalf("%v", err)
+			}
+			return
 		case "fanout":
 			fanout(os.Args[2:])
 			return
@@ -38,7 +43,7 @@ func main() {
 			return
 		}
 	}
-	fmt.Fprintln(os.Stderr, "usage: bench {fanout|rooms|migration|eval {p0|p1|all|diff|report}} [flags]")
+	fmt.Fprintln(os.Stderr, "usage: bench {fanout|rooms|migration|capacity|soak|eval {p0|p1|all|diff|report}} [flags]")
 	os.Exit(2)
 }
 

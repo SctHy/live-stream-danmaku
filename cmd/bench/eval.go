@@ -32,7 +32,7 @@ func suite(profile string) []eval.Experiment {
 		}
 		e := eval.Experiment{Name: "fanout_sweep", Load: load}
 		for _, name := range []string{"legacy", "adaptive_batch", "mixed_25pct_legacy"} {
-			a := fanArm(name, viewers, rate)
+			a := fanArm(name, viewers, rate, 2)
 			switch name {
 			case "legacy":
 				a.Args = append(a.Args, "-legacy")
@@ -43,16 +43,31 @@ func suite(profile string) []eval.Experiment {
 		}
 		experiments = append(experiments, e)
 	}
-	iso := eval.Experiment{Name: "isolation_stalled"}
-	for _, name := range []string{"baseline_single_shard_unbounded", "protected_default"} {
-		a := fanArm(name, 160, 800)
-		a.Args = append(a.Args, "-stalled", "12", "-idle-rooms", "32", "-churn", "50ms")
-		if name != "protected_default" {
-			a.GatewayArgs = []string{"-room-shards", "1", "-send-queue", "8192", "-bench-disable-slow-kick"}
+	for _, group := range []struct{ load, control, treatment string }{
+		{"room_shards", "single_shard", "default_shards"},
+		{"slow_kick", "kick_disabled", "kick_enabled"},
+	} {
+		iso := eval.Experiment{Name: "isolation_stalled", Load: group.load}
+		for _, name := range []string{group.control, group.treatment} {
+			seconds := 2
+			if group.load == "slow_kick" {
+				seconds = 6
+			}
+			a := fanArm(name, 160, 600, seconds)
+			a.Args = append(a.Args, "-idle-rooms", "32", "-churn", "50ms")
+			if group.load == "slow_kick" {
+				a.Args = append(a.Args, "-stalled", "4", "-padding", "400")
+			}
+			switch name {
+			case "single_shard":
+				a.GatewayArgs = []string{"-room-shards", "1"}
+			case "kick_disabled":
+				a.GatewayArgs = []string{"-bench-disable-slow-kick"}
+			}
+			iso.Arms = append(iso.Arms, a)
 		}
-		iso.Arms = append(iso.Arms, a)
+		experiments = append(experiments, iso)
 	}
-	experiments = append(experiments, iso)
 	migration := eval.Experiment{Name: "migration_strategies"}
 	viewers, events := "120", "24"
 	if profile == "full" {
@@ -63,8 +78,8 @@ func suite(profile string) []eval.Experiment {
 	}
 	return append(experiments, migration)
 }
-func fanArm(name string, viewers, rate int) eval.Arm {
-	return eval.Arm{Name: name, Args: []string{"-viewers", strconv.Itoa(viewers), "-rate", strconv.Itoa(rate), "-seconds", "2", "-cold-rate", "100", "-sample-viewers", "8"}}
+func fanArm(name string, viewers, rate, seconds int) eval.Arm {
+	return eval.Arm{Name: name, Args: []string{"-viewers", strconv.Itoa(viewers), "-rate", strconv.Itoa(rate), "-seconds", strconv.Itoa(seconds), "-cold-rate", "100", "-sample-viewers", "8"}}
 }
 func measure(bin, experiment string, a eval.Arm) (sample eval.RunSample, err error) {
 	var passed bool
@@ -96,6 +111,7 @@ func measure(bin, experiment string, a eval.Arm) (sample eval.RunSample, err err
 		stop := make(chan struct{})
 		done := make(chan struct{})
 		peak := before["process_resident_memory_bytes"]
+		peakGoroutines := before["go_goroutines"]
 		var pollErr error
 		go func() {
 			defer close(done)
@@ -112,6 +128,7 @@ func measure(bin, experiment string, a eval.Arm) (sample eval.RunSample, err err
 						return
 					}
 					peak = max(peak, s["process_resident_memory_bytes"])
+					peakGoroutines = max(peakGoroutines, s["go_goroutines"])
 				}
 			}
 		}()
@@ -133,6 +150,7 @@ func measure(bin, experiment string, a eval.Arm) (sample eval.RunSample, err err
 		for k, v := range after.Changes(before) {
 			sample.Metrics[k] = v
 		}
+		sample.Metrics["goroutines_peak"] = max(peakGoroutines, after["go_goroutines"])
 		sample.Metrics["rss_peak_bytes"] = max(peak, after["process_resident_memory_bytes"])
 	}
 	for k, n := range sample.Metrics {

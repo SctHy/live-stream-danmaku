@@ -22,6 +22,7 @@ import (
 var sessionClient = &http.Client{Timeout: 10 * time.Second}
 
 type observer struct {
+	windows                  []deliveryWindow
 	err                      error
 	conn                     *websocket.Conn
 	received                 atomic.Int64
@@ -91,13 +92,16 @@ func (o *observer) record(seq int) {
 	o.unique++
 }
 
-func connect(addr, room string, expected int, batch, sample bool, readers *sync.WaitGroup) (*observer, error) {
+func connect(addr, room string, expected, windowSize int, batch, sample bool, readers *sync.WaitGroup) (*observer, error) {
 	conn, err := dial(addr, room, batch)
 	if err != nil {
 		return nil, err
 	}
 	expectedRoom := room + "/load"
 	o := &observer{conn: conn, seen: make([]uint64, (expected+63)/64), cursor: "0-0", firstDuplicate: -1}
+	if windowSize > 0 {
+		o.windows = make([]deliveryWindow, (expected+windowSize-1)/windowSize)
+	}
 	readers.Add(1)
 	go func() {
 		defer readers.Done()
@@ -133,20 +137,38 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 					o.err = fmt.Errorf("unexpected sequence %q", d.Content)
 					return
 				}
+				var w *deliveryWindow
+				if windowSize > 0 {
+					w = &o.windows[seq/windowSize]
+				}
+				previousUnique := o.unique
 				o.record(seq)
+				if w != nil {
+					if o.unique > previousUnique {
+						w.unique++
+					} else {
+						w.duplicates++
+					}
+				}
 
 				if p.Previous != o.cursor || p.Position == "" {
 					o.gaps++
+					if w != nil {
+						w.gaps++
+					}
 				}
 				o.cursor = p.Position
 
 				if sample {
-					sent, err := strconv.ParseInt(stamp, 10, 64)
+					sent, err := strconv.ParseInt(strings.SplitN(stamp, "/", 2)[0], 10, 64)
 					if err != nil {
 						o.err = err
 						return
 					}
 					o.latency = append(o.latency, now-sent)
+					if w != nil {
+						w.latency = append(w.latency, now-sent)
+					}
 				}
 			}
 			if n > 0 {
@@ -159,11 +181,11 @@ func connect(addr, room string, expected int, batch, sample bool, readers *sync.
 	return o, nil
 }
 
-func send(writers []*observer, n, rate int) error {
+func send(writers []*observer, n, rate int, padding string) error {
 	start := time.Now()
 	for i := 0; i < n; i++ {
 		time.Sleep(time.Until(start.Add(time.Second * time.Duration(i) / time.Duration(rate))))
-		data := fmt.Appendf(nil, `{"type":%d,"data":{"content":"%d/%d"}}`, protocol.TypeDanmaku, i, time.Now().UnixMicro())
+		data := fmt.Appendf(nil, `{"type":%d,"data":{"content":"%d/%d%s"}}`, protocol.TypeDanmaku, i, time.Now().UnixMicro(), padding)
 		if err := writers[i%len(writers)].conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			return err
 		}

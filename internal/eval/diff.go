@@ -26,6 +26,8 @@ type Diff struct {
 
 func direction(k string) string {
 	switch k {
+	case ClientFull, Kicked:
+		return "observed"
 	case "qps", "rows_per_second", "rows_per_sec", "achieved_rate":
 		return "higher_is_better"
 	case "frames", "process_cpu_seconds_total", "rss_peak_bytes", "go_memstats_alloc_bytes_total",
@@ -128,6 +130,8 @@ func CompareReports(b, c Report, threshold float64, allowMissing bool) (Diff, er
 				}
 				limit := math.Abs(x) * threshold
 				switch {
+				case r.Direction == "observed":
+					r.Status = "OBSERVED"
 				case change > limit:
 					r.Status = "REGRESSED"
 				case change < -limit:

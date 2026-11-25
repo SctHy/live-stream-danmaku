@@ -10,12 +10,17 @@ import (
 	"strings"
 )
 
+const (
+	ClientFull = `danmaku_dropped_messages_total{reason="client_full"}`
+	Kicked     = "danmaku_kicked_slow_clients_total"
+)
+
 var keys = []string{
 	`danmaku_fanout_frames_total{mode="single"}`,
 	`danmaku_fanout_frames_total{mode="batch"}`,
-	`danmaku_dropped_messages_total{reason="client_full"}`,
+	ClientFull,
 	`danmaku_dropped_messages_total{reason="shard_full"}`,
-	"danmaku_kicked_slow_clients_total",
+	Kicked,
 	"danmaku_delivery_queue_wait_seconds_sum",
 	"danmaku_delivery_queue_wait_seconds_count",
 	"process_cpu_seconds_total",
