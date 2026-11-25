@@ -65,30 +65,31 @@ WebSocket 登录身份、OBS 活跃场次和回放视频文件路径使用有容
 
 ## 性能测试结果
 
-以下是核心引擎提交 `f29748d` 的实测数据，未覆盖后续账号、广场、礼物和看板接口。基线采于 2026-11-25T12:00:15.613601Z，`git_sha: f29748d9ed7acba06cfe1b4942daceabb9f572f9`，`dirty: false`。环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。`full` 模式下每组预热后测量 5 轮，表中为中位数。
+基线采于 2026-11-25T20:22:59.428944Z，`git_sha: 46d00557c2410193666931552837a565d8351ce8`，`dirty: false`。环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。全功能网关在 `full` 模式下完成 20 组实验，每组预热后测量 5 轮，全部通过实验不变式检查。表中为中位数。
 
 | 实验与负载 | 对照组 → 处理组 | 指标 | 对照中位数 | 处理中位数 | Gate |
 | --- | --- | --- | ---: | ---: | --- |
-| 自适应批合并 high | legacy → adaptive_batch | `frames` | 313600 | 99680 | PASS |
-| 热房延迟 high | legacy → adaptive_batch | `hot_p99_us` | 4385 | 9984 | PASS |
-| 分片隔离 | single_shard → default_shards | `cold_p99_us` | 3741 | 3646 | PASS |
+| 自适应批合并 high | legacy → adaptive_batch | `frames` | 313600 | 99008 | PASS |
+| 广播 CPU high | legacy → adaptive_batch | `process_cpu_seconds_total` | 2.5383 | 1.331456 | PASS |
+| 热房延迟 high | legacy → adaptive_batch | `hot_p99_us` | 5238 | 8518 | PASS |
+| 分片隔离 | single_shard → default_shards | `cold_p99_us` | 2760 | 2151 | PASS |
 | 分片隔离 | single_shard → default_shards | `danmaku_dropped_messages_total{reason="client_full"}` | 0 | 0 | PASS |
 | 分片隔离 | single_shard → default_shards | `danmaku_kicked_slow_clients_total` | 0 | 0 | PASS |
-| 慢连接踢除 | kick_disabled → kick_enabled | `cold_p99_us` | 3413 | 3325 | PASS |
+| 慢连接踢除 | kick_disabled → kick_enabled | `cold_p99_us` | 2593 | 2385 | PASS |
 | 慢连接踢除 | kick_disabled → kick_enabled | `danmaku_dropped_messages_total{reason="client_full"}` | 11992 | 32 | PASS |
 | 慢连接踢除 | kick_disabled → kick_enabled | `danmaku_kicked_slow_clients_total` | 0 | 4 | PASS |
-| 迁移补发峰值 | crash → bounded | `recent_peak_qps` | 340 | 80 | PASS |
-| 迁移排空 | crash → bounded | `drain_ms` | 453 | 1907.667 | PASS |
-| 深分页 page_3600 | offset_baseline → cursor_before_id_prod | `p50_us` | 155210.083 | 383.959 | PASS |
-| 归档写入 batch_128 | row_by_row_tx → multivalue_insert | `rows_per_second` | 6291.176410054454 | 93155.55362516547 | PASS |
-| 归档写入 batch_128 | row_by_row_tx → unnest_prod | `rows_per_second` | 6291.176410054454 | 103448.51943428337 | PASS |
-| 敏感词扫描 words_20000 | naive_contains → ac_prod | `miss_us` | 137.0575 | 1.47125 | PASS |
+| 迁移补发峰值 | crash → bounded | `recent_peak_qps` | 330 | 80 | PASS |
+| 迁移排空 | crash → bounded | `drain_ms` | 452 | 1905.346 | PASS |
+| 深分页 page_3600 | offset_baseline → cursor_before_id_prod | `p50_us` | 161060.5 | 455.417 | PASS |
+| 归档写入 batch_128 | row_by_row_tx → multivalue_insert | `rows_per_second` | 4820.906235317528 | 69944.27239276672 | PASS |
+| 归档写入 batch_128 | row_by_row_tx → unnest_prod | `rows_per_second` | 4820.906235317528 | 75254.88550454212 | PASS |
+| 敏感词扫描 words_20000 | naive_contains → ac_prod | `miss_us` | 138.57875 | 1.46 | PASS |
 | Redis 去重 2ms | multi_cmd_baseline → lua_evalsha_prod | `race_duplicate_rate` | 0.21875 | 0 | PASS |
 | 直播源请求合并 burst_120 | direct_no_coalesce → prod_singleflight_cache | `cold_upstream_calls` | 120 | 1 | PASS |
 
-在干净提交 `cb37610` 上重跑 full（每组 5 轮），20 组不变式全部通过，但 15% 回归门禁未通过：慢连接踢除组冷房 P99 从 3,325 升至 23,071 µs，UNNEST 归档从 103,449 降至 72,870 行/秒。
+慢连接踢除组的冷房 P99 从修复前 `cb37610` 的 23071 µs 降至 2385 µs。5 轮测量均踢除 4 个停读连接，健康观众零漏收。
 
-基线每批 128 行时，多值 INSERT 和 UNNEST 的吞吐分别约为逐行写入的 14.81 倍和 16.44 倍。主要收益来自批量化，两种批写方式之间相差约 11%。基线版本的 UNNEST 每批固定使用 5 个绑定参数；当前版本随消息字段扩展为 9 个，参数数目仍与批内行数无关。
+每批 128 行时，多值 INSERT 和生产 UNNEST 的吞吐分别为逐行写入的 14.51 倍和 15.61 倍。生产 UNNEST 每批绑定 9 个数组，对照组每行提供 5 个字段。
 
 单机 loopback 上，512 到 1024 名热房观众之间出现延迟拐点，热房 P99 从 4535 升至 11611 µs，各档均无漏收。另一次 3 分钟持续压测中，热房正常观众收齐 5529600 条投递，累计踢除 24 个慢连接，末两次采样 RSS 持平，goroutine 全程采样为 332–333 个。[阶梯容量报告](evaluation/capacity.json) · [稳态报告](evaluation/soak.json)
 
