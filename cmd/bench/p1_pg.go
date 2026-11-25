@@ -191,7 +191,7 @@ func (s *p1Suite) archive(pool *pgxpool.Pool) error {
 		}
 	}
 	repo := store.NewMessageRepo(pool)
-	return s.run("pg_archive_write", "batch_128", "UNNEST builds client arrays but uses five bind parameters per batch.", []string{"row_by_row_tx", "multivalue_insert", "unnest_prod"}, func(arm string) (measurement, error) {
+	return s.run("pg_archive_write", "batch_128", "Production UNNEST binds nine arrays per batch. The comparison inserts supply five fields per row.", []string{"row_by_row_tx", "multivalue_insert", "unnest_prod"}, func(arm string) (measurement, error) {
 		m := newMeasurement()
 		_, err := pool.Exec(s.ctx, "TRUNCATE danmaku_messages")
 		if err != nil {

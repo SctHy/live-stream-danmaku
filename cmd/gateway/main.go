@@ -112,6 +112,11 @@ func run() (code int) {
 
 	r := http.NewServeMux()
 	handler := httpapi.NewChatHandler(history, m, sessions, *allowDev)
+	// Keep collecting through migration and drain before closing Redis.
+	profileCtx, stopProfiles := context.WithCancel(context.WithoutCancel(ctx))
+	profilesDone := make(chan struct{})
+	go func() { defer close(profilesDone); handler.RunInterestWriter(profileCtx) }()
+	defer func() { stopProfiles(); <-profilesDone }()
 	handler.SetRecommendations(recommend.Default())
 	handler.SetCommerce(plugins)
 	go m.Start()

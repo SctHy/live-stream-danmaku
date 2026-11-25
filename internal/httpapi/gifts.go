@@ -130,7 +130,7 @@ func (h *ChatHandler) gifts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !duplicate {
-		h.recordInterest(ctx, login.UserID, r.PathValue("room"), 5)
+		h.recordInterest(login.UserID, r.PathValue("room"), 5)
 	}
 	if err = h.flushGifts(ctx, db, g.RoomID); err != nil {
 		dbError(w, err)

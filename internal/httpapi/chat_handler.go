@@ -59,7 +59,7 @@ type sessionStore interface {
 type ChatHandler struct {
 	videos          ttlcache.Cache[int64, replayFile]
 	recommendations *recommend.Registry
-	profileSlots    chan struct{}
+	interests       interestBuffer
 	liveResolver    *liveResolver
 	history         HistoryStore
 	manager         *hub.Hub
@@ -71,7 +71,7 @@ type ChatHandler struct {
 
 func NewChatHandler(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool) *ChatHandler {
 	plugins := commerce.DefaultPlugins()
-	return &ChatHandler{recommendations: recommend.Default(), profileSlots: make(chan struct{}, 32), plugins: plugins, liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
+	return &ChatHandler{recommendations: recommend.Default(), interests: newInterestBuffer(), plugins: plugins, liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
 }
 
 func (h *ChatHandler) SetRecommendations(r *recommend.Registry) { h.recommendations = r }
@@ -253,7 +253,8 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 		return
 	}
 
-	client.Interest = func(weight int) { h.recordInterest(r.Context(), uid, r.PathValue("room"), weight) }
+	roomSlug := r.PathValue("room")
+	client.Interest = func(weight int) { h.recordInterest(uid, roomSlug, weight) }
 	client.Interest(1)
 	go client.WritePump()
 	client.ReadPump(h.manager)

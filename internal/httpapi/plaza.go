@@ -346,7 +346,7 @@ func (h *ChatHandler) square(w http.ResponseWriter, r *http.Request) {
 		}
 		if uid != 0 {
 			if s, ok := h.sessions.(profileStore); ok {
-				req.Profile, e = s.Preferences(ctx, uid)
+				req.Profile, e = h.readProfile(ctx, s, uid)
 				if e != nil {
 					dbError(w, e)
 					return

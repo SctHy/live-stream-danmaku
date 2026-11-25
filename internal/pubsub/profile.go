@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,12 +24,46 @@ redis.call('ZREMRANGEBYRANK',KEYS[3],0,-31)
 for _,key in ipairs(KEYS) do redis.call('EXPIRE',key,604800) end
 return 1`)
 
-func (s *Store) RecordInterest(ctx context.Context, uid uint64, room, category string, tags []string, weight int, at time.Time) error {
-	args := []any{room, weight, category, at.UnixMilli()}
-	for _, tag := range tags {
+type InterestDelta struct {
+	UserID         uint64
+	Room, Category string
+	Tags           []string
+	Weight         int
+	At             time.Time
+}
+
+func (d InterestDelta) args() []any {
+	args := []any{d.Room, d.Weight, d.Category, d.At.UnixMilli()}
+	for _, tag := range d.Tags {
 		args = append(args, tag)
 	}
-	return updateProfile.Run(ctx, s.r, profileKeys(uid), args...).Err()
+	return args
+}
+
+// Each script operates on a single user's hash slot. Retry only commands
+// Redis explicitly rejected with NOSCRIPT, never ambiguous increments.
+func (s *Store) RecordInterests(ctx context.Context, batch []InterestDelta) error {
+	p := s.r.Pipeline()
+	cmds := make([]*redis.Cmd, len(batch))
+	for i, d := range batch {
+		cmds[i] = updateProfile.EvalSha(ctx, p, profileKeys(d.UserID), d.args()...)
+	}
+	if _, err := p.Exec(ctx); err == nil {
+		return nil
+	}
+	var firstErr error
+	retry := s.r.Pipeline()
+	for i, cmd := range cmds {
+		err := cmd.Err()
+		if redis.HasErrorPrefix(err, "NOSCRIPT") {
+			d := batch[i]
+			updateProfile.Eval(ctx, retry, profileKeys(d.UserID), d.args()...)
+		} else if firstErr == nil {
+			firstErr = err
+		}
+	}
+	_, err := retry.Exec(ctx)
+	return errors.Join(firstErr, err)
 }
 func (s *Store) Preferences(ctx context.Context, uid uint64) (recommend.Profile, error) {
 	keys := profileKeys(uid)

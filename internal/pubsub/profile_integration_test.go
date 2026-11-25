@@ -20,11 +20,11 @@ func TestBoundedInterestProfile(t *testing.T) {
 	defer s.r.Del(ctx, profileKeys(uid)...)
 	for i := 0; i < 40; i++ {
 		room := fmt.Sprintf("room-%02d", i)
-		if err := s.RecordInterest(ctx, uid, room, "music", []string{room}, i+1, at.Add(time.Duration(i)*time.Second)); err != nil {
+		if err := s.RecordInterests(ctx, []InterestDelta{{uid, room, "music", []string{room}, i + 1, at.Add(time.Duration(i) * time.Second)}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.RecordInterest(ctx, uid, "unknown", "", nil, 1, at.Add(time.Hour)); err != nil {
+	if err := s.RecordInterests(ctx, []InterestDelta{{uid, "unknown", "", nil, 1, at.Add(time.Hour)}}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := s.Preferences(ctx, uid)
