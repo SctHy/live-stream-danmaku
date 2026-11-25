@@ -1,5 +1,5 @@
 type Sources = { flv?: string; hls?: string }
-export function playRoom(video: HTMLVideoElement, room: string, report: (text: string) => void) {
+export function playRoom(video: HTMLVideoElement, room: string, report: (text: string) => void, source: (mode: string, session?: string) => void) {
   const scope = new AbortController()
   let release = () => {}
   let attempts = 0
@@ -9,14 +9,15 @@ export function playRoom(video: HTMLVideoElement, room: string, report: (text: s
     const run = ++generation
     report('正在获取直播源…')
     try {
-      const response = await fetch('/api/live/playurl?room_id=' + encodeURIComponent(room), {
+      const response = await fetch('/api/rooms/' + encodeURIComponent(room) + '/stream', {
         signal: AbortSignal.any([scope.signal, AbortSignal.timeout(8000)])
       })
       if (!response.ok) throw Error()
-      const {live, sources}: {live: boolean; sources: Sources} = await response.json()
+      const {mode, session, live, sources}: {mode: string; session?: string; live: boolean; sources: Sources} = await response.json()
       if (scope.signal.aborted) return
+      source(mode, live ? session : undefined)
       if (!live) {
-        report('直播间未开播，30 秒后刷新')
+        report(mode === 'none' ? '本地弹幕' : '直播间未开播，30 秒后刷新')
         timer = setTimeout(connect, 30000)
         return
       }
@@ -34,7 +35,7 @@ export function playRoom(video: HTMLVideoElement, room: string, report: (text: s
         const playing = () => {
           clearTimeout(startup)
           attempts = 0
-          report(flv ? '直播中 · FLV' : '直播中 · HLS')
+          report(mode === 'obs' ? 'OBS 直播中 · HLS' : flv ? '直播中 · FLV' : '直播中 · HLS')
         }
         const waiting = () => {
           clearTimeout(startup)

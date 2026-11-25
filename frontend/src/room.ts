@@ -1,10 +1,11 @@
 import './settings'
 import './discovery'
-import {base, room, session, run, type Order, type Controls} from './business'
+import {base, room, session, selectSession, run, type Order, type Controls} from './business'
 import {loadAccount} from './account'
 import {activePins, showGift} from './gifts'
 import {actions, state, roomInfo} from './staff'
 import {enqueue, removeMessage, resetOverlay} from './danmaku'
+import {replayLibrary, startReplay} from './replay'
 import {playRoom} from './player'
 // The gateway exports these numeric discriminants from internal/protocol/message.go.
 interface ProtocolTypes {
@@ -98,21 +99,59 @@ const ui = {
 ui.join.querySelector<HTMLInputElement>('[name=room]')!.value = room
 ui.join.querySelector<HTMLInputElement>('[name=session]')!.value = session
 const { video } = ui
-const listLimit = 100
-function play(source: string) {
-  ui.liveComments.labels![0].hidden = false
-  video.hidden = false
-  playRoom(video, source, text => { ui.sourceStatus.textContent = text })
+const overlayEnabled = document.querySelector<HTMLInputElement>('#overlayEnabled')!
+overlayEnabled.onchange = () => {
+  document.querySelector('.screen')!.classList.toggle('without-ink', !overlayEnabled.checked)
 }
+const listLimit = 100
+let stopLive: (() => void) | undefined
+let replay: ReturnType<typeof startReplay> | undefined
+let posting = false
+function play() {
+  if (replay) return
+  stopLive?.()
+  stopLive = playRoom(video, room, text => { ui.sourceStatus.textContent = text }, (mode, next) => {
+    video.hidden = mode === 'none'
+    ui.liveComments.labels![0].hidden = mode !== 'bilibili'
+    if (next && next !== session) {
+      selectSession(next)
+      socket?.close()
+      socket = undefined
+      ui.connection.dataset.state = 'connecting'
+      ui.connection.textContent = '连接中'
+      connecting = ready = false
+      cursor = ''
+      pendingSend = null
+      clear()
+      controls()
+      void connect()
+    }
+  })
+}
+replayLibrary(recording => {
+  stopLive?.()
+  stopLive = undefined
+  replay?.stop()
+  resetOverlay()
+  ui.liveComments.labels![0].hidden = true
+  replay = startReplay(video, recording)
+  controls()
+})
+document.getElementById('backLive')!.onclick = () => {
+  replay?.stop()
+  replay = undefined
+  feedback('')
+  controls()
+  play()
+}
+play()
 void roomInfo().then(info => {
   if (info.role === 'moderator' || info.role === 'owner') {
     ui.messages.querySelectorAll<HTMLElement>('small[data-event]').forEach(user => {
       if (!user.querySelector('.row-actions')) user.append(actions(user.dataset.event!,Number(user.dataset.uid)))
     })
   }
-  const source = info.bilibili_room_id || (/^\d+$/.test(room) ? room : '')
-  if (source) play(source)
-}).catch(() => { if (/^\d+$/.test(room)) play(room) })
+}).catch(() => {})
 void run(activePins)
 ui.fullscreen.onclick = () => {
   if (document.fullscreenElement) void document.exitFullscreen()
@@ -131,6 +170,13 @@ const feedback = (text: string) => {
 function controls() {
   for (const input of [ui.send, ui.like, ui.message]) input.disabled = !ready
 
+  if (replay) {
+    ui.message.disabled = false
+    ui.send.disabled = posting
+    ui.like.hidden = ui.retry.hidden = true
+    return
+  }
+  ui.like.hidden = false
   ui.send.disabled ||= !!pendingSend
   ui.retry.hidden = !pendingSend
   ui.retry.disabled = !ready
@@ -148,8 +194,8 @@ let listFrame = 0
 let snapshotRows = false
 function show(d: SidebarMessage, animate: boolean) {
   if (visible.has(d.event_id) || queuedRows.has(d.event_id)) return
-  if (animate) enqueue(d)
-  else snapshotRows = true
+  if (!animate) snapshotRows = true
+  else if (!replay && overlayEnabled.checked) enqueue(d)
   if (document.hidden) return
   queuedRows.set(d.event_id, d)
   if (queuedRows.size > listLimit) queuedRows.delete(queuedRows.keys().next().value!)
@@ -213,7 +259,10 @@ function apply(p: JournalEvent, animate: boolean) {
       feedback('弹幕已送达')
     }
   }
-  if (p.type === packetType.roomState) state(p.data)
+  if (p.type === packetType.roomState) {
+    state(p.data)
+    if ('stream' in p.data) play()
+  }
   if (p.type === packetType.gift) showGift(p.data)
   cursor = p.pos
 }
@@ -236,8 +285,10 @@ async function connect() {
   if (connecting) return
   clearTimeout(retryTimer)
   connecting = true
+  const path = base
   try {
     const sessionInfo = await json<{ user_id: number }>('/api/session', { method: 'POST', signal: AbortSignal.timeout(8000) })
+    if (path !== base) return
     if (userID !== sessionInfo.user_id && pendingSend) {
       pendingSend = null
       feedback('身份已变更，上一条的结果请查看近期弹幕')
@@ -263,7 +314,7 @@ async function connect() {
           base + '/recent?after=' + encodeURIComponent(after),
           { signal: AbortSignal.timeout(8000) },
         )
-        if (ws.readyState !== WebSocket.OPEN || (promoted && socket !== ws)) return
+        if (path !== base || ws.readyState !== WebSocket.OPEN || (promoted && socket !== ws)) return
         // The old socket can advance the cursor while the snapshot is in flight.
         // Apply only the suffix beyond that cursor, including across a stream reset.
         let events = res.events
@@ -327,6 +378,7 @@ async function connect() {
       apply(p, true)
     }
     ws.onmessage = ({ data }) => {
+      if (path !== base) { ws.close(); return }
       if (promoted && ws !== socket) return
       const parsed: ServerPacket | ServerPacket[] = JSON.parse(data)
       for (const p of Array.isArray(parsed) ? parsed : [parsed]) {
@@ -358,11 +410,12 @@ async function connect() {
     }
     ws.onclose = () => {
       clearTimeout(deadline)
-      if (promoted && socket !== ws) return
+      if (path !== base || (promoted && socket !== ws)) return
       if (!promoted) connecting = false
       reconnect()
     }
   } catch {
+    if (path !== base) return
     connecting = false
     reconnect()
   }
@@ -382,9 +435,19 @@ function reconnect() {
 }
 ui.compose.onsubmit = (e) => {
   e.preventDefault()
-  if (pendingSend || !ready || !wsOpen()) return
   const text = ui.message.value.trim()
   if (!text) return
+  if (replay) {
+    if (posting) return
+    const target = replay
+    posting = true
+    controls()
+    void run(async () => {
+      if (await target.send(text) && ui.message.value.trim() === text) ui.message.value = ''
+    }).finally(() => { posting = false; controls() })
+    return
+  }
+  if (pendingSend || !ready || !wsOpen()) return
   pendingSend = {
     started: Date.now(),
     data: {

@@ -139,3 +139,14 @@ dialog input { color: var(--text); }
 .staff .row-actions { display: inline-flex; gap: 4px; margin-left: 6px; }
 .row-actions button { font-size: 11px; padding: 1px 5px; }
 [data-tab][aria-pressed=true] { color: var(--mint); }
+#replayBar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+#replayTitle { flex: 1; color: var(--mint); }
+#replayInk { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
+#replayInk span { position: absolute; white-space: nowrap; font-weight: 600; text-shadow: 0 1px 3px black; }
+#timeline { margin: 0; padding: 6px; list-style: none; height: 320px; flex: 1 1 0; overflow-y: auto; }
+#timeline button { text-align: left; background: transparent; border: 0; overflow-wrap: anywhere; }
+#timeline [aria-current] { color: var(--mint); background: var(--control); }
+#recordings { list-style: none; padding: 0; }
+#recordings li { padding-block: 10px; border-bottom: 1px solid var(--line); }
+@media (max-width: 800px) { #timeline { flex: none; } }
+.without-ink #overlay, .without-ink #replayInk { visibility: hidden; }

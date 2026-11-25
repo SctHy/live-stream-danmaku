@@ -1,9 +1,17 @@
 export const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const params = new URLSearchParams(location.search)
 export const room = params.get('room') || '6'
-export const session = params.get('session') || 'screening-01'
+export let session = params.get('session') || 'screening-01'
 export const roomPath = '/api/rooms/' + encodeURIComponent(room)
-export const base = roomPath + '/' + encodeURIComponent(session)
+export let base = roomPath + '/' + encodeURIComponent(session)
+export function selectSession(next: string) {
+  session = next
+  base = roomPath + '/' + encodeURIComponent(next)
+  const url = new URL(location.href)
+  url.searchParams.set('session', next)
+  history.replaceState(null, '', url)
+  el<HTMLInputElement>('session').value = next
+}
 export interface Controls {
   notice: string
   mute_all: boolean

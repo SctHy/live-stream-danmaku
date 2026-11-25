@@ -94,7 +94,7 @@ async function controls() {
   for (const key of ['title', 'description', 'active_session', 'bilibili_room_id'] as const)
     input('editRoom', key).value = current[key]
   input('editRoom', 'status').value = c.status
-  await moderators()
+  await Promise.all([moderators(), credentials(false)])
 }
 async function mutes() {
   const r = await api<{ mutes: { user_id: number; expires_at: number }[] }>(base + '/mutes')
@@ -191,3 +191,35 @@ el('staffOpen').onclick = () => {
 document
   .querySelectorAll<HTMLButtonElement>('[data-tab]')
   .forEach((b) => (b.onclick = () => void run(() => tab(b.dataset.tab!))))
+
+const server = el<HTMLInputElement>('obsServer')
+const key = el<HTMLInputElement>('obsKey')
+function maskKey() {
+  key.type = 'password'
+  el('showKey').textContent = '显示'
+}
+async function credentials(rotate: boolean) {
+  const data = await api<{obs_server: string; obs_stream_key: string}>(
+    roomPath + '/stream-key' + (rotate ? '/rotate' : ''), rotate ? 'POST' : 'GET',
+  )
+  maskKey()
+  server.value = data.obs_server
+  key.value = data.obs_stream_key
+  el('obsStatus').textContent = rotate ? '推流码已重置，请更新 OBS 配置' : '推流配置已就绪'
+}
+el('showKey').onclick = () => {
+  if (key.type === 'text') maskKey()
+  else {
+    key.type = 'text'
+    el('showKey').textContent = '隐藏'
+  }
+}
+el('staff').addEventListener('close', maskKey)
+el('rotateKey').onclick = () => {
+  if (confirm('重置后，旧推流码将无法用于开播。继续吗？')) void run(() => credentials(true))
+}
+for (const [id, field] of [['copyServer', server], ['copyKey', key]] as const)
+  el(id).onclick = () => void run(async () => {
+    await navigator.clipboard.writeText(field.value)
+    el('obsStatus').textContent = '已复制'
+  })

@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Maku · 弹幕放映室</title>
-    <script type="module" crossorigin src="/assets/index-DaPDb7cg.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BgHNlbPb.css">
+    <script type="module" crossorigin src="/assets/index-61ZI1kJ8.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Cw9N7EhZ.css">
   </head>
   <body>
     <header>
@@ -28,7 +28,7 @@
         </form>
         <nav>
           <span id="identity">访客</span> <button id="accountOpen">登录 / 注册</button>
-          <button id="plazaOpen">直播广场</button> <button hidden id="staffOpen">房管与看板</button>
+          <button id="replaysOpen">直播回放</button> <button id="plazaOpen">直播广场</button> <button hidden id="staffOpen">房管与看板</button>
         </nav>
         <div class="badges">
           <span id="connection" data-state="connecting" role="status">连接中</span>
@@ -43,8 +43,14 @@
       <div id="pins"></div>
       <div class="layout">
         <section class="player" aria-label="放映区">
+          <div id="replayBar" hidden>
+            <strong id="replayTitle"></strong>
+            <label>倍速 <select id="rate"><option>0.5</option><option selected>1</option><option>1.25</option><option>1.5</option><option>2</option></select> ×</label>
+            <button id="backLive">返回直播</button>
+          </div>
           <div class="screen">
             <video id="video" hidden muted controls playsinline preload="auto"></video>
+            <div id="replayInk" aria-hidden="true"></div>
             <canvas id="overlay" aria-hidden="true"></canvas>
           </div>
           <div class="toolbar">
@@ -52,6 +58,7 @@
             <label class="live-switch" hidden
               ><input id="live-comments" type="checkbox" role="switch" checked />B 站弹幕</label
             >
+            <label class="live-switch"><input id="overlayEnabled" type="checkbox" role="switch" checked />弹幕</label>
             <button id="fullscreen" type="button">全屏</button>
           </div>
           <details id="settings">
@@ -95,6 +102,7 @@
         </section>
         <aside aria-labelledby="heading">
           <h2 id="heading">实时弹幕</h2>
+          <ol id="timeline" hidden></ol>
           <ol id="messages"></ol>
           <details id="rank">
             <summary>贡献榜</summary>
@@ -125,6 +133,11 @@
         </aside>
       </div>
     </main>
+    <dialog id="replays" aria-label="直播回放">
+      <div class="dialoghead"><h2>直播回放</h2><button data-close>关闭</button></div>
+      <ul id="recordings"></ul><button hidden id="moreReplays">更早回放</button>
+      <p class="result" role="status"></p>
+    </dialog>
     <dialog id="account" aria-label="账号与钱包">
       <div class="dialoghead">
         <h2>账号与钱包</h2>
@@ -209,6 +222,14 @@
           <label>全员禁言<input name="mute_all" type="checkbox" /></label><button>保存禁言设置</button>
         </form>
         <section id="owner" hidden>
+          <section aria-label="OBS 推流配置">
+            <h3>OBS 推流配置</h3>
+            <label>OBS 服务器<input readonly id="obsServer"></label><button id="copyServer">复制服务器</button>
+            <label>OBS 推流码<input readonly type="password" id="obsKey" autocomplete="off"></label>
+            <button id="showKey">显示</button> <button id="copyKey">复制推流码</button> <button id="rotateKey">重置推流码</button>
+            <p>在 OBS 选择自定义推流服务，粘贴服务器与推流码，然后开始推流。</p>
+            <p id="obsStatus" role="status"></p>
+          </section>
           <form id="editRoom">
             <label>标题<input name="title" maxlength="100" required /></label
             ><label>简介<input name="description" maxlength="1000" /></label
