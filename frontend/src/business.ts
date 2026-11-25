@@ -20,6 +20,8 @@ export interface Controls {
 }
 export interface Room extends Controls {
   slug: string
+  category: string
+  tags: string[]
   title: string
   description: string
   active_session: string
@@ -28,6 +30,11 @@ export interface Room extends Controls {
 }
 export interface Order {
   id: number
+  effect_type: string
+  combo_count: number
+  combo_key: string
+  sender_id: number
+  gift_code: string
   sender_name: string
   gift_name: string
   quantity: number

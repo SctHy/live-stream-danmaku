@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Maku · 弹幕放映室</title>
-    <script type="module" crossorigin src="/assets/index-61ZI1kJ8.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Cw9N7EhZ.css">
+    <script type="module" crossorigin src="/assets/index-CZ7goAK1.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Bs5wcbq2.css">
   </head>
   <body>
     <header>
@@ -40,6 +40,7 @@
       <h1 id="title">弹幕放映室</h1>
       <p id="state"></p>
       <p id="notice"></p>
+      <div id="combos" aria-live="polite"></div>
       <div id="pins"></div>
       <div class="layout">
         <section class="player" aria-label="放映区">
@@ -167,6 +168,12 @@
         </form>
         <p id="balance"></p>
         <button id="claim">每日签到领积分</button>
+        <h3>模拟充值</h3>
+        <form id="recharge"><select id="packages" name="package_code" aria-label="充值档位" required></select><button>创建充值单</button></form>
+        <ul id="recharges"></ul>
+        <form id="redeem"><label>兑换码<input name="code" placeholder="MAKU2026" required /></label><button>兑换</button></form>
+        <h3>资金账本</h3>
+        <ul id="ledger"></ul>
         <h3>近期消费</h3>
         <ul id="orders"></ul>
         <button id="logout">退出登录</button>
@@ -179,7 +186,8 @@
         <button type="button" data-close>关闭</button>
       </div>
       <select id="sort" aria-label="排序">
-        <option value="hot">热度</option>
+        <option value="recommend">推荐</option>
+        <option value="hot" selected>热度</option>
         <option value="online">在线</option>
         <option value="latest">最新</option>
       </select>
@@ -187,6 +195,9 @@
         <option value="all">全部</option>
         <option value="live">直播中</option>
       </select>
+      <select id="categoryFilter" aria-label="分区"><option value="">全部分区</option></select>
+      <select id="strategy" aria-label="策略" hidden><option value="">自动分桶</option></select>
+      <small id="effectiveStrategy"></small>
       <div id="rooms"></div>
       <details id="createBox" hidden>
         <summary>创建直播间</summary>
@@ -194,7 +205,9 @@
           <label>房间标识<input name="slug" pattern="[a-zA-Z0-9_\-]{1,24}" required /></label
           ><label>标题<input name="title" maxlength="100" required /></label
           ><label>简介<input name="description" maxlength="1000" /></label
-          ><label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
+          ><label>分区<select name="category" required></select></label>
+            <label>标签（逗号分隔，最多 5 个）<input name="tags" /></label>
+            <label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
           ><button>创建并进入</button>
         </form>
       </details>
@@ -233,7 +246,9 @@
           <form id="editRoom">
             <label>标题<input name="title" maxlength="100" required /></label
             ><label>简介<input name="description" maxlength="1000" /></label
-            ><label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
+            ><label>分区<select name="category" required></select></label>
+            <label>标签（逗号分隔，最多 5 个）<input name="tags" /></label>
+            <label>B 站房号<input name="bilibili_room_id" pattern="[0-9]{1,20}" /></label
             ><label>活动场次<input name="active_session" pattern="[a-zA-Z0-9_\-]{1,24}" required /></label
             ><label
               >开播状态<select name="status">

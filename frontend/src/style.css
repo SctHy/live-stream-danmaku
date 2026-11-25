@@ -150,3 +150,10 @@ dialog input { color: var(--text); }
 #recordings li { padding-block: 10px; border-bottom: 1px solid var(--line); }
 @media (max-width: 800px) { #timeline { flex: none; } }
 .without-ink #overlay, .without-ink #replayInk { visibility: hidden; }
+#combos { display: flex; flex-wrap: wrap; gap: 6px; }
+#combos span, .category-badge { border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; color: var(--mint); font-size: 12px; }
+.category-badge { margin-right: 6px; }
+#redeem, #recharge { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+#recharges li { overflow-wrap: anywhere; }
+#recharges button { margin: 3px; padding: 3px 6px; font-size: 12px; }
+#effectiveStrategy { display: block; color: var(--secondary); }

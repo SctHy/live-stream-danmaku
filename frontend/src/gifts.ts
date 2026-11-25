@@ -4,6 +4,7 @@ interface Gift {
   code: string
   name: string
   price: number
+  effect_type: string
   is_superchat: boolean
 }
 const select = el<HTMLSelectElement>('gift'),
@@ -11,6 +12,22 @@ const select = el<HTMLSelectElement>('gift'),
   message = el<HTMLInputElement>('sc')
 const rank = el<HTMLDetailsElement>('rank')
 const pins = new Map<number, HTMLElement>()
+const combos = new Map<string, { row: HTMLElement; timer: number; order: number }>()
+export function broadcastGift(g: Order) {
+  if (g.effect_type !== 'combo' && !(g.combo_count > 1)) return showGift(g)
+  const key = g.combo_key || g.sender_id + ':' + g.gift_code
+  const previous = combos.get(key)
+  if (previous && previous.order >= g.id) return
+  const row = previous?.row || document.createElement('span')
+  if (!previous) el('combos').append(row)
+  clearTimeout(previous?.timer)
+  row.textContent = g.sender_name + ' · ' + g.gift_name + ' × ' + (g.combo_count || g.quantity) + ' 连击'
+  const timer = window.setTimeout(() => {
+    row.remove()
+    combos.delete(key)
+  }, 5000)
+  combos.set(key, { row, timer, order: g.id })
+}
 export function showGift(g: Order) {
   if (!g.pinned_until || pins.has(g.id)) return
   const remaining = Date.parse(g.pinned_until) - Date.now()
@@ -40,13 +57,15 @@ export async function activePins() {
 }
 async function catalog() {
   const { gifts } = await api<{ gifts: Gift[] }>('/api/gifts/catalog')
-  select.replaceChildren(...gifts.map((g) => new Option(g.name + ' · ' + g.price + ' 积分', g.code)))
-  select.onchange = () => {
+  select.replaceChildren(...gifts.map((g) => new Option(g.name + ' · ' + g.price + ' 积分' + (g.effect_type === 'combo' ? ' · 连击' : ''), g.code)))
+  const updateSelection = () => {
     const sc = gifts[select.selectedIndex].is_superchat
     qty.hidden = qty.disabled = message.required = sc
     message.hidden = !sc
     if (sc) qty.value = '1'
   }
+  select.onchange = updateSelection
+  if (gifts.length) updateSelection()
 }
 void run(catalog)
 let lastAttempt: { body: string; id: string } | undefined

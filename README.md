@@ -55,6 +55,12 @@ flowchart LR
 
 **PostgreSQL 离线时**，只要 Redis 正常且网关未停机，实时弹幕、断线补发和 `/readyz` 仍可用。广场回退到 Redis 中的活跃房间，已有登录会话可读取身份（余额缺省），礼物目录和已有贡献榜仍可读取。注册、登录、修改资料、房间资料与授权、钱包签到与礼物订单、历史检索、审计和场次看板等依赖数据库的读写返回 503。配置的旧版房管密钥仍可禁言和解禁单个用户。已缓存的 OBS 直播源仍可读取；推流密钥、开播鉴权及依赖场次记录的回放查询、播放与补发返回 503。数据库重连成功后，网关自动恢复业务。
 
+## 可插拔扩展架构
+
+- **礼物与账本**　`internal/commerce` 通过 `CatalogProvider` 提供目录，按商品的 `effect_type` 从注册表选择 `GiftEffect`。新增商品可直接配置目录；新增效果可实现 `Prepare` 并在启动时注册。签到、充值、兑换和送礼都在事务内更新余额并追加 `wallet_ledger`，以用户、业务类型和业务标识保证重复请求只记一次账。
+- **支付渠道**　`PaymentProvider` 封装建单和回调验签。内置 `sandbox` 支持模拟支付或关单，`voucher` 支持兑换码入账。接入新支付渠道时，实现 `Name`、`Create`、`VerifyWebhook` 并加入渠道注册表，即可复用充值单状态流转和账本结算。
+- **广场推荐**　`internal/recommend` 依次执行 Recall → Filter → Scorer → Reranker。召回阶段选出候选房间，过滤阶段按直播状态和分区筛选，评分阶段计算顺序与推荐理由，重排阶段可调整分区多样性。新增策略时注册需要的组件，再用 `RegisterStrategy` 按名称组合。前端读取策略列表，默认按用户分桶，也可手动指定策略。
+
 ## 性能测试结果
 
 以下是核心引擎提交 `f29748d` 的实测数据，未覆盖后续账号、广场、礼物和看板接口。基线采于 2026-11-25T12:00:15.613601Z，`git_sha: f29748d9ed7acba06cfe1b4942daceabb9f572f9`，`dirty: false`。环境为 darwin/arm64、go1.27.4，Go 可见 10 个逻辑 CPU。`full` 模式下每组预热后测量 5 轮，表中为中位数。
@@ -107,15 +113,23 @@ make eval-all LEDGER=evaluation/candidate.json && make eval-diff
 | POST | `/api/session` | 创建或复用访客身份，返回 `user_id`，并通过 HttpOnly Cookie 保存会话 |
 | POST | `/api/auth/register`、`/api/auth/login`、`/api/auth/logout` | 注册、登录或退出账号，登录态由 Cookie 保存 |
 | GET / PATCH | `/api/auth/me` | 读取当前身份，或修改已登录账号的昵称 |
-| GET | `/api/rooms` | 广场排序 `sort=hot/online/latest`，过滤 `status=all/live`，`limit` 默认 20，上限 50 |
-| POST | `/api/rooms` | 登录后提交 `slug`、`title` 建房，可附简介及 B 站房号 |
+| GET | `/api/rooms` | 广场排序 `sort=hot/online/latest/recommend`，支持 `status=all/live`、`category` 分区及 `strategy` 策略；返回生效策略和各房间的推荐理由，`limit` 默认 20，上限 50 |
+| POST | `/api/rooms` | 登录后提交 `slug`、`title` 建房，可附简介、B 站房号、分区 `category` 及最多五个标签 `tags` |
 | GET / PATCH | `/api/rooms/{room}` | 查询资料与当前角色；房主可更新资料、当前场次、直播状态和管控设置 |
 | GET / POST | `/api/rooms/{room}/moderators` | 房主或房管查看名单；房主按用户名或用户 ID 任命 |
 | DELETE | `/api/rooms/{room}/moderators/{user_id}` | 房主解除任命 |
 | GET | `/api/rooms/{room}/{session}/mutes` | 查看本场次禁言名单 |
 | GET | `/api/rooms/{room}/{session}/audits` | 按房间查询审计记录，支持 `before_id`、`limit` |
-| GET | `/api/gifts/catalog` | 礼物编码、价格与醒目留言置顶时长 |
-| GET | `/api/wallet` | 查询余额、今日签到状态和近期订单 |
+| GET | `/api/plaza/strategies` | 查询合法分区及已注册的推荐策略 |
+| GET | `/api/me/preferences` | 查看当前账号或访客的分区、标签及近期房间偏好 |
+| GET | `/api/wallet/recharge-packages` | 查询充值档位、价格（分）、到账积分及可用渠道 |
+| POST | `/api/wallet/recharges` | 提交 `client_order_id`、`package_code` 和可选 `provider`（默认 sandbox） |
+| GET | `/api/wallet/recharges/{order_no}` | 查询本人充值单状态 |
+| POST | `/api/wallet/recharges/{order_no}/simulate` | 模拟回调，传 `action=pay` 或 `close` |
+| POST | `/api/payments/webhook/{provider}` | 渠道外部回调；sandbox 用原始请求体的 HMAC-SHA256 十六进制摘要校验 `X-Payment-Signature` |
+| POST | `/api/wallet/redeem` | 传 `code` 兑换积分，重复领取返回 `duplicate=true` |
+| GET | `/api/gifts/catalog` | 礼物编码、价格、效果类型与醒目留言置顶时长 |
+| GET | `/api/wallet` | 查询余额、今日签到状态、近期礼物单、充值单和资金流水 |
 | POST | `/api/wallet/checkin` | 每日签到，重复领取不增加余额 |
 | GET / POST | `/api/rooms/{room}/{session}/gifts` | 按 `limit` 查近期礼物与有效置顶；下单传 `client_order_id`、`gift_code`、`quantity` 和可选留言 `message`（醒目留言必填） |
 | GET | `/api/rooms/{room}/{session}/leaderboard` | 查询本场贡献榜前 20 名 |
@@ -138,6 +152,8 @@ maku/
 │   ├── archiver/       # Kafka -> PostgreSQL 异步归档启动入口
 │   └── bench/          # 广播压测、冷热房间隔离、双网关迁移、阶梯容量与稳态压测工具
 ├── internal/
+│   ├── commerce/       # 礼物目录、效果与支付渠道注册表
+│   ├── recommend/      # 召回、过滤、评分、重排及策略注册
 │   ├── filter/         # Aho-Corasick 敏感词过滤与词库热更新
 │   ├── httpapi/        # HTTP/WebSocket、账号权限、广场缓存、礼物与看板、OBS 回调、回放视频与弹幕 API、内嵌前端
 │   ├── hub/            # 房间连接管理、分片广播、批量合并发送、慢连接保护与平滑迁移
@@ -209,6 +225,9 @@ make run-gateway     # 终端 2：启动弹幕网关
 
 | 分类 | 配置项 | 默认值与说明 |
 | --- | --- | --- |
+| 礼物目录 | `GIFT_CATALOG_FILE` | 可选 JSON 礼物数组文件路径，留空加载内置目录 |
+| 支付回调 | `PAYMENT_WEBHOOK_SECRET` | sandbox 回调签名密钥，留空时每进程随机生成；多网关验签应配置相同密钥 |
+| 兑换渠道 | `VOUCHER_CODES` | 逗号分隔的 `CODE=积分`，省略面额时为 600，默认 `MAKU2026=600` |
 | OBS 推流 | `OBS_RTMP_URL` | 房主看到的服务器地址，默认 `rtmp://127.0.0.1:1935/live` |
 | OBS 播放 | `OBS_HLS_BASE_URL` | HLS 根路径，默认 `/hls`，由 Nginx 转发 |
 | 录制存储 | `REPLAY_STORAGE_DIR` | 本机默认 `./data/replays`，Compose 使用共享卷 `/replays` |

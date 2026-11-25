@@ -1,13 +1,28 @@
+import { taxonomy, categoryOptions, roomFields } from './taxonomy'
 import { api, base, button, el, enter, list, onForm, result, run, showDialog, type Room } from './business'
 const sort = el<HTMLSelectElement>('sort'),
   filter = el<HTMLSelectElement>('filter')
+const category = el<HTMLSelectElement>('categoryFilter')
+const strategy = el<HTMLSelectElement>('strategy')
 let version = 0
 async function plaza() {
   const current = ++version
-  const response = await api<{ rooms: (Room & { online: number; heat: number })[]; degraded: boolean }>(
-    '/api/rooms?' + new URLSearchParams({ sort: sort.value, status: filter.value }),
+  const data = await taxonomy()
+  if (current !== version) return
+  if (category.options.length === 1) {
+    category.append(...categoryOptions(data))
+    strategy.append(...data.strategies.map(s => new Option(s.label + ' · ' + s.name, s.name)))
+    el<HTMLFormElement>('create').querySelector('select')!.replaceChildren(...categoryOptions(data))
+  }
+  strategy.hidden = sort.value !== 'recommend'
+  const params = new URLSearchParams({ sort: sort.value, status: filter.value })
+  if (category.value) params.set('category', category.value)
+  if (!strategy.hidden && strategy.value) params.set('strategy', strategy.value)
+  const response = await api<{ rooms: (Room & { online: number; heat: number; recommend_reason: string })[]; degraded: boolean; strategy: string }>(
+    '/api/rooms?' + params,
   )
   if (current !== version) return
+  el('effectiveStrategy').textContent = strategy.hidden ? '' : '当前策略 · ' + response.strategy
   el('rooms').replaceChildren(
     ...response.rooms.map((r) => {
       const card = button(r.title, async () => enter(r))
@@ -19,6 +34,16 @@ async function plaza() {
         '热度 ' + r.heat,
       ].join(' · ')
       card.append(meta, document.createTextNode(r.description))
+      const name = data.categories.find(c => c.code === r.category)?.name
+      if (name) {
+        const badge = document.createElement('span')
+        badge.className = 'category-badge'
+        badge.textContent = name
+        card.prepend(badge)
+      }
+      const detail = document.createElement('small')
+      detail.textContent = [...(r.tags || []).map(t => '#' + t), r.recommend_reason].filter(Boolean).join(' · ')
+      card.append(detail)
       return card
     }),
   )
@@ -28,8 +53,8 @@ el('plazaOpen').onclick = () => {
   showDialog('plaza')
   void run(plaza)
 }
-sort.onchange = filter.onchange = () => void run(plaza)
-onForm('create', async (data) => enter(await api<Room>('/api/rooms', 'POST', data)))
+category.onchange = strategy.onchange = sort.onchange = filter.onchange = () => void run(plaza)
+onForm('create', async (data) => enter(await api<Room>('/api/rooms', 'POST', roomFields(data))))
 let before = 0,
   query = '',
   searchVersion = 0

@@ -1,3 +1,4 @@
+import { taxonomy, categoryOptions, roomFields } from './taxonomy'
 import {
   api,
   base,
@@ -59,7 +60,7 @@ onForm('noticeForm', (data) => moderate({ action: 'notice', notice: data.notice 
 onForm('slowForm', (data) => moderate({ action: 'slow_mode', seconds: Number(data.slow_mode_seconds) }))
 onForm('muteForm', (data) => moderate({ action: 'mute_all', enabled: !!data.mute_all }))
 onForm('editRoom', async (data) => {
-  const updated = await api<Room>(roomPath, 'PATCH', data)
+  const updated = await api<Room>(roomPath, 'PATCH', roomFields(data))
   if (updated.active_session !== session) enter(updated)
   else location.reload()
 })
@@ -93,6 +94,10 @@ async function controls() {
   if (current.role !== 'owner') return
   for (const key of ['title', 'description', 'active_session', 'bilibili_room_id'] as const)
     input('editRoom', key).value = current[key]
+  const categories = el<HTMLFormElement>('editRoom').querySelector<HTMLSelectElement>('[name=category]')!
+  categories.replaceChildren(...categoryOptions(await taxonomy()))
+  categories.value = current.category
+  input('editRoom', 'tags').value = (current.tags || []).join(', ')
   input('editRoom', 'status').value = c.status
   await Promise.all([moderators(), credentials(false)])
 }

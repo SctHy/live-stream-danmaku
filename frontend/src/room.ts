@@ -2,7 +2,7 @@ import './settings'
 import './discovery'
 import {base, room, session, selectSession, run, type Order, type Controls} from './business'
 import {loadAccount} from './account'
-import {activePins, showGift} from './gifts'
+import {activePins, broadcastGift} from './gifts'
 import {actions, state, roomInfo} from './staff'
 import {enqueue, removeMessage, resetOverlay} from './danmaku'
 import {replayLibrary, startReplay} from './replay'
@@ -263,7 +263,7 @@ function apply(p: JournalEvent, animate: boolean) {
     state(p.data)
     if ('stream' in p.data) play()
   }
-  if (p.type === packetType.gift) showGift(p.data)
+  if (p.type === packetType.gift) broadcastGift(p.data)
   cursor = p.pos
 }
 function older(a: string, b: string) {
