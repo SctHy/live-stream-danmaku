@@ -23,7 +23,7 @@ export async function loadAccount() {
   if (version !== accountVersion) return
   me = account
   setBalance(me.balance)
-  el('accountOpen').textContent = loggedIn() ? '账号与钱包' : '登录 / 注册'
+  el('accountLabel').textContent = loggedIn() ? '账号与钱包' : '登录 / 注册'
   el('wallet').hidden = !loggedIn()
   el('auth').hidden = loggedIn()
   el<HTMLFormElement>('rename').querySelector('input')!.value = me.nickname

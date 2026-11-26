@@ -1,5 +1,6 @@
 import './settings'
-import './discovery'
+import {installMenu} from './menu'
+import {decorateRoom} from './icons'
 import {base, room, session, selectSession, run, type Order, type Controls} from './business'
 import {loadAccount} from './account'
 import {activePins, broadcastGift} from './gifts'
@@ -533,3 +534,6 @@ ui.moderation.onsubmit = async (e) => {
     feedback('房管操作失败')
   }
 }
+
+decorateRoom()
+installMenu(play)

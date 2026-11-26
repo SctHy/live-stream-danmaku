@@ -17,7 +17,7 @@ window.addEventListener('accountchange', () => {
   if (el<HTMLDialogElement>('plaza').open) void run(plaza)
 })
 let version = 0
-async function plaza() {
+async function plaza(selectedCategory?: string) {
   const current = ++version
   const data = await taxonomy()
   if (current !== version) return
@@ -26,6 +26,7 @@ async function plaza() {
     strategy.append(...data.strategies.map(s => new Option(s.label + ' · ' + s.name, s.name)))
     el<HTMLFormElement>('create').querySelector('select')!.replaceChildren(...categoryOptions(data))
   }
+  if (selectedCategory !== undefined) category.value = selectedCategory
   strategy.hidden = sort.value !== 'recommend'
   const following = sort.value === 'following'
   category.hidden = filter.hidden = following
@@ -54,17 +55,8 @@ async function plaza() {
         '热度 ' + r.heat,
       ].join(' · ')
       card.append(meta)
-      if (r.description) card.append(document.createTextNode(r.description))
-      const name = data.categories.find(c => c.code === r.category)?.name
-      if (name) {
-        const badge = document.createElement('span')
-        badge.className = 'category-badge'
-        badge.textContent = name
-        card.prepend(badge)
-      }
-      const detail = document.createElement('small')
-      detail.textContent = [...(r.tags || []).map(t => '#' + t), r.recommend_reason].filter(Boolean).join(' · ')
-      if (detail.textContent) card.append(detail)
+      card.title = [r.description, data.categories.find(c => c.code === r.category)?.name,
+        ...(r.tags || []).map(tag => '#' + tag), r.recommend_reason].filter(Boolean).join(' · ')
       const cover = document.createElement('span')
       cover.className = 'cover'
       cover.dataset.theme = r.cover_theme
@@ -76,10 +68,15 @@ async function plaza() {
   )
   result(response.degraded ? '房间资料暂不可用，仍可进入活跃房间' : response.rooms.length ? '' : '暂无房间')
 }
-el('plazaOpen').onclick = () => {
+export function openPlaza(selectedCategory?: string, following = false) {
+  if (following || selectedCategory !== undefined) {
+    sort.value = following ? 'following' : 'hot'
+    filter.value = 'all'
+  }
   showDialog('plaza')
-  void run(plaza)
+  void run(() => plaza(selectedCategory))
 }
+el('plazaOpen').onclick = () => openPlaza()
 category.onchange = strategy.onchange = sort.onchange = filter.onchange = () => void run(plaza)
 onForm('create', async (data) => enter(await api<Room>('/api/rooms', 'POST', roomFields(data))))
 let before = 0,

@@ -4,14 +4,36 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Maku · 弹幕放映室</title>
-    <script type="module" crossorigin src="/assets/index-C5RBnLMr.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DaA5d7JU.css">
+    <script type="module" crossorigin src="/assets/index-Dg2TgGtL.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BuV5qmh4.css">
   </head>
   <body>
     <header>
       <div class="bar">
-        <a class="brand" href="/"><i aria-hidden="true"></i>Maku</a>
-        <form id="join">
+        <a class="brand" href="/">Maku</a>
+        <div id="menuRoot">
+          <button id="menuToggle" aria-expanded="false" aria-controls="menuPanel">菜单</button>
+          <div id="menuPanel" hidden><div id="menuParents"></div><div id="menuChildren" hidden></div></div>
+        </div>
+
+        <nav>
+          <span id="identity">访客</span> <button id="accountOpen"><span id="accountLabel">登录 / 注册</span></button>
+          <button id="replaysOpen">直播回放</button> <button id="plazaOpen">直播广场</button> <button hidden id="staffOpen">房管与看板</button>
+        </nav>
+      </div>
+    </header>
+    <main>
+      <div class="roomhead">
+        <h1 id="title">弹幕放映室</h1>
+        <p id="state"></p>
+        <span id="roomTags"></span>
+        <button id="follow" hidden></button>
+        <div class="badges">
+          <span id="connection" data-state="connecting" role="status">连接中</span>
+          <span id="stats">在线 — · 赞 —</span>
+        </div>
+      </div>
+      <form id="join">
           <label
             >房间<input
               id="room"
@@ -26,19 +48,6 @@
           /></label>
           <button>进入房间</button>
         </form>
-        <nav>
-          <span id="identity">访客</span> <button id="accountOpen">登录 / 注册</button>
-          <button id="replaysOpen">直播回放</button> <button id="plazaOpen">直播广场</button> <button hidden id="staffOpen">房管与看板</button>
-        </nav>
-        <div class="badges">
-          <span id="connection" data-state="connecting" role="status">连接中</span>
-          <span id="stats">在线 — · 赞 —</span>
-        </div>
-      </div>
-    </header>
-    <main>
-      <div class="roomhead"><h1 id="title">弹幕放映室</h1>
-      <p id="state"></p><span id="roomTags"></span><button id="follow" hidden></button></div>
       <p id="notice"></p>
       <div id="combos" aria-live="polite"></div>
       <div id="pins"></div>
@@ -54,6 +63,7 @@
             <button id="backLive">返回直播</button>
           </div>
           <div class="screen">
+            <div class="idle-screen" aria-hidden="true"></div>
             <video id="video" hidden muted controls playsinline preload="auto"></video>
             <div id="replayInk" aria-hidden="true"></div>
             <canvas id="overlay" aria-hidden="true"></canvas>
@@ -66,31 +76,8 @@
             <label class="live-switch"><input id="overlayEnabled" type="checkbox" role="switch" checked />弹幕</label>
             <button id="fullscreen" type="button">全屏</button>
           </div>
-          <details id="settings">
-            <summary>弹幕设置</summary>
-            <div class="fields"></div>
-          </details>
-          <details>
-            <summary>送礼物 / 醒目留言</summary>
-            <form id="giftForm">
-              <select id="gift" aria-label="礼物"></select
-              ><input
-                type="number"
-                id="quantity"
-                aria-label="数量"
-                min="1"
-                max="99"
-                value="1"
-                required
-              /><input hidden id="sc" maxlength="120" placeholder="醒目留言" aria-label="醒目留言" /><button>
-                赠送
-              </button>
-            </form>
-          </details>
           <div class="composer">
             <form id="compose">
-              <select id="inkColor" aria-label="发送颜色"><option value="#ffffff">白色</option><option value="#34d399">薄荷</option><option value="#38bdf8">晴蓝</option><option value="#facc15">金黄</option><option value="#fb7185">珊瑚</option><option value="#c084fc">浅紫</option></select>
-              <select id="inkMode" aria-label="弹幕位置"><option value="scroll">滚动</option><option value="top">顶部</option><option value="bottom">底部</option></select>
               <input id="message"
                 maxlength="500"
                 required
@@ -101,9 +88,34 @@
               />
               <button id="send" disabled>发送</button>
               <button type="button" id="like" disabled>赞 +1</button>
+              <select id="inkColor" aria-label="发送颜色"><option value="#ffffff">白色</option><option value="#34d399">薄荷</option><option value="#38bdf8">晴蓝</option><option value="#facc15">金黄</option><option value="#fb7185">珊瑚</option><option value="#c084fc">浅紫</option></select>
+              <select id="inkMode" aria-label="弹幕位置"><option value="scroll">滚动</option><option value="top">顶部</option><option value="bottom">底部</option></select>
             </form>
             <button type="button" id="retry" hidden>重试上一条</button>
             <p id="feedback" role="status"></p>
+          </div>
+          <div class="player-tools">
+            <details>
+              <summary>送礼物 / 醒目留言</summary>
+              <form id="giftForm">
+                <select id="gift" aria-label="礼物"></select
+                ><input
+                  type="number"
+                  id="quantity"
+                  aria-label="数量"
+                  min="1"
+                  max="99"
+                  value="1"
+                  required
+                /><input hidden id="sc" maxlength="120" placeholder="醒目留言" aria-label="醒目留言" /><button>
+                  赠送
+                </button>
+              </form>
+            </details>
+            <details id="settings">
+              <summary>弹幕设置</summary>
+              <div class="fields"></div>
+            </details>
           </div>
         </section>
         <aside aria-labelledby="heading">
@@ -187,7 +199,7 @@
     </dialog>
     <dialog id="plaza" aria-label="直播广场">
       <div class="dialoghead">
-        <h2>直播广场</h2><button id="createToggle" aria-controls="createBox" aria-expanded="false">+ 创建直播间</button>
+        <h2>直播广场</h2><button id="createToggle" aria-controls="createBox" aria-expanded="false">创建直播间</button>
         <button type="button" data-close>关闭</button>
       </div>
       <section id="createBox" hidden>
@@ -201,18 +213,20 @@
           ><button>创建并进入</button>
         </form>
       </section>
-      <select id="sort" aria-label="排序">
-        <option value="recommend">推荐</option>
-        <option value="hot" selected>热度</option>
-        <option value="online">在线</option>
-        <option value="following">我的关注</option><option value="latest">最新</option>
-      </select>
-      <select id="filter" aria-label="筛选">
-        <option value="all">全部</option>
-        <option value="live">直播中</option>
-      </select>
-      <select id="categoryFilter" aria-label="分区"><option value="">全部分区</option></select>
-      <select id="strategy" aria-label="策略" hidden><option value="">自动分桶</option></select>
+      <div class="plaza-filters">
+        <select id="sort" aria-label="排序">
+          <option value="recommend">推荐</option>
+          <option value="hot" selected>热度</option>
+          <option value="online">在线</option>
+          <option value="following">我的关注</option><option value="latest">最新</option>
+        </select>
+        <select id="filter" aria-label="筛选">
+          <option value="all">全部</option>
+          <option value="live">直播中</option>
+        </select>
+        <select id="categoryFilter" aria-label="分区"><option value="">全部分区</option></select>
+        <select id="strategy" aria-label="策略" hidden><option value="">自动分桶</option></select>
+      </div>
       <small id="effectiveStrategy"></small>
       <div id="rooms"></div>
 
@@ -245,7 +259,7 @@
             <label>OBS 服务器<input readonly id="obsServer"></label><button id="copyServer">复制服务器</button>
             <label>OBS 推流码<input readonly type="password" id="obsKey" autocomplete="off"></label>
             <button id="showKey">显示</button> <button id="copyKey">复制推流码</button> <button id="rotateKey">重置推流码</button>
-            <p>在 OBS 选择自定义推流服务，粘贴服务器与推流码，然后开始推流。</p>
+
             <p id="obsStatus" role="status"></p>
           </section>
           <form id="editRoom">

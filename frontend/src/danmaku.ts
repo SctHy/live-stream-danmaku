@@ -39,7 +39,7 @@ export function enqueue(message: Message) {
   }
 }
 function rasterize({content: text, color}: Message) {
-  const font = '600 ' + settings.size + 'px system-ui, sans-serif'
+  const font = '600 ' + settings.size + 'px Geist, -apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB, sans-serif'
   ctx.font = font
   const image = document.createElement('canvas')
   image.width = Math.max(1, Math.min(Math.ceil(ctx.measureText(text).width) + 6, 4096))

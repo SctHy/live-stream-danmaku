@@ -7,7 +7,8 @@
   },
   "dependencies": {
     "hls.js": "^1",
-    "mpegts.js": "^1.8.0"
+    "mpegts.js": "^1.8.0",
+    "reicon": "^1.2.5"
   },
   "devDependencies": {
     "typescript": "^5",
