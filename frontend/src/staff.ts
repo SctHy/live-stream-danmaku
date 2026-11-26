@@ -1,4 +1,5 @@
 import { taxonomy, categoryOptions, roomFields } from './taxonomy'
+import { roomInitial } from './covers'
 import {
   api,
   base,
@@ -42,6 +43,8 @@ export async function roomInfo() {
   if (version !== revision) return
   current = room
   el('title').textContent = current.title
+  const avatar = document.getElementById('roomAvatar')
+  if (avatar) avatar.textContent = roomInitial(current.title, current.slug)
   el('staffOpen').hidden = !['owner', 'moderator'].includes(current.role)
   document.body.classList.toggle('staff', !el('staffOpen').hidden)
   el('owner').hidden = current.role !== 'owner'

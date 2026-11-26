@@ -50,7 +50,8 @@ export interface Contributor {
   total_cost: number
 }
 export function enter(r: Room) {
-  location.search = new URLSearchParams({ room: r.slug, session: r.active_session || 'live' }).toString()
+  const qs = new URLSearchParams({ room: r.slug, session: r.active_session || 'live' }).toString()
+  location.href = '/?' + qs
 }
 export async function api<T = void>(url: string, method = 'GET', data?: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -74,7 +75,11 @@ export async function api<T = void>(url: string, method = 'GET', data?: unknown)
   return response.status === 204 ? (undefined as T) : response.json()
 }
 export function result(text: string) {
-  const target = document.querySelector('dialog[open] .result') || el('feedback')
+  const plaza = document.getElementById('plaza')
+  const target =
+    document.querySelector('dialog[open] .result') ||
+    (plaza && !plaza.hidden ? plaza.querySelector('.result') : null) ||
+    el('feedback')
   target.textContent = text
 }
 export async function run(fn: () => Promise<void>) {
@@ -125,6 +130,6 @@ export function showDialog(id: string) {
   dialog.querySelector('.result')!.textContent = ''
   dialog.showModal()
 }
-document
-  .querySelectorAll<HTMLButtonElement>('[data-close]')
-  .forEach((b) => (b.onclick = () => b.closest('dialog')!.close()))
+document.querySelectorAll<HTMLButtonElement>('dialog [data-close]').forEach((b) => {
+  b.onclick = () => b.closest('dialog')?.close()
+})

@@ -105,10 +105,12 @@ func (h *ChatHandler) Routes(mux *http.ServeMux) {
 			protocol.TypeWithdraw, protocol.TypeReady, protocol.TypeMigrate, protocol.TypeLiveDanmaku, protocol.TypeRoomState, protocol.TypeGift)
 	})
 	mux.Handle("GET /assets/", http.FileServerFS(web))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFileFS(w, r, assets, "web/index.html")
-	})
+	}
+	mux.HandleFunc("GET /{$}", serveIndex)
+	mux.HandleFunc("GET /plaza", serveIndex)
 
 	mux.HandleFunc("GET /api/live/playurl", h.liveResolver.serve)
 	mux.HandleFunc("POST /api/session", h.session)
