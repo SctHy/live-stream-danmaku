@@ -38,7 +38,7 @@ func TestActivityWindowAndSessionTotals(t *testing.T) {
 			t.Fatal(status, err)
 		}
 	}
-	batch := []HeatBatch{{Minute: now.Unix() / 60, ID: rand.Text(), Rooms: map[string]uint64{slug: 1}}}
+	batch := []HeatBatch{{Minute: now.Unix() / 60, ID: rand.Text(), RoomFifths: map[string]uint64{slug: 15}}}
 	for range 2 {
 		if err := s.FlushHeat(ctx, batch); err != nil {
 			t.Fatal(err)

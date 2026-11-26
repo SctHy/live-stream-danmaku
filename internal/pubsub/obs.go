@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -42,4 +43,20 @@ func (s *Store) SetOBS(ctx context.Context, room string, v OBSStream) error {
 		return err
 	}
 	return s.r.Set(ctx, key, raw, 0).Err()
+}
+
+// OffsetMS resolves the media clock only for sessions backed by an OBS stream.
+func (s *Store) OffsetMS(ctx context.Context, roomID string, at time.Time) (*int64, error) {
+	room, session, _ := strings.Cut(roomID, "/")
+	if !strings.HasPrefix(session, "obs-") {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	active, err := s.OBS(ctx, room)
+	if err != nil || active.RoomID != roomID {
+		return nil, err
+	}
+	offset := max(int64(0), at.UnixMilli()-active.Started)
+	return &offset, nil
 }

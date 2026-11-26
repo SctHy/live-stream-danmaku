@@ -69,3 +69,52 @@ func TestJournalRecoveryAndWithdrawal(t *testing.T) {
 		t.Fatal(fresh)
 	}
 }
+
+func TestWithdrawFilterUsesWithdrawalsBeforeCursor(t *testing.T) {
+	events := []protocol.WsPacket{
+		{Type: protocol.TypeWithdraw, Data: json.RawMessage(`{"event_id":"a"}`), Position: "first"},
+		{Type: protocol.TypeDanmaku, Data: json.RawMessage(`{"event_id":"a","content":"hidden"}`), Previous: "first", Position: "second"},
+	}
+	if err := WithdrawFilter(events, 1); err != nil {
+		t.Fatal(err)
+	}
+	if p := events[1]; p.Type != protocol.TypeWithdraw || string(p.Data) != `{"event_id":"a"}` || p.Previous != "first" || p.Position != "second" {
+		t.Fatal(p)
+	}
+}
+
+func TestGuardedAppendRejectsInvalidWindow(t *testing.T) {
+	s := &Store{}
+	status, _, err := s.AppendWithGuards(t.Context(), GuardSpec{GateWindowSeconds: 30, RateWindowMS: 500, RateLimit: 1}, "id", nil)
+	if err == nil || status != "unavailable" {
+		t.Fatal(status, err)
+	}
+}
+
+func TestGuardedAppendRejectsInvalidInput(t *testing.T) {
+	valid := GuardSpec{DenyKey: "deny", RateKey: "rate", GateKey: "gate", ExemptSetKey: "staff", LastAdmittedKey: "last", StreamKey: "stream", Channel: "channel", DedupKey: "request", GateWindowSeconds: 1, RateWindowMS: 10, RateLimit: 1, DedupSeconds: 1}
+	for _, field := range []string{"stream", "channel", "dedup", "event", "empty", "json", "window", "collision"} {
+		g, id, payload := valid, "event", []byte("{}")
+		switch field {
+		case "stream":
+			g.StreamKey = ""
+		case "channel":
+			g.Channel = " "
+		case "dedup":
+			g.DedupKey = ""
+		case "event":
+			id = ""
+		case "empty":
+			payload = nil
+		case "json":
+			payload = []byte("{")
+		case "collision":
+			g.DedupKey = g.StreamKey
+		case "window":
+			g.DedupSeconds = 0
+		}
+		if _, _, err := new(Store).AppendWithGuards(t.Context(), g, id, payload); err == nil {
+			t.Fatal(field)
+		}
+	}
+}

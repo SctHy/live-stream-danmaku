@@ -1,15 +1,18 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/recommend"
 	"github.com/scthy/maku/internal/store"
@@ -38,6 +41,9 @@ func (h *ChatHandler) access(w http.ResponseWriter, r *http.Request, legacy bool
 var errBusinessOffline = errors.New("business database unavailable")
 
 func (h *ChatHandler) loadAccess(r *http.Request, legacy bool) (roomAccess, error) {
+	return h.loadAccessTx(r, legacy, pgx.TxOptions{})
+}
+func (h *ChatHandler) loadAccessTx(r *http.Request, legacy bool, opts pgx.TxOptions) (roomAccess, error) {
 	ctx := r.Context()
 	var a roomAccess
 	if !legacy {
@@ -51,7 +57,7 @@ func (h *ChatHandler) loadAccess(r *http.Request, legacy bool) (roomAccess, erro
 	if db == nil {
 		return a, errBusinessOffline
 	}
-	tx, err := db.Begin(ctx)
+	tx, err := db.BeginTx(ctx, opts)
 	if err != nil {
 		return a, err
 	}
@@ -101,9 +107,21 @@ func validRoom(v store.Room) bool {
 	}
 	return recommend.CategoryName(v.Category) != "" && slug.MatchString(v.Slug) && validText(v.Title, 1, 100) && validText(v.Description, 0, 1000) && validText(v.Notice, 0, 1000) && slug.MatchString(v.ActiveSession) && (v.Bilibili == "" || numericRoom.MatchString(v.Bilibili)) && (v.Status == "live" || v.Status == "offline") && v.Slow >= 0 && v.Slow <= 300
 }
+func (h *ChatHandler) publishRoom(ctx context.Context, v store.Room, started time.Time) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	h.bus.Rooms.Publish(ctx, events.RoomStateChanged{Room: v.Slug, Snapshot: string(raw), Started: started})
+	return nil
+}
 func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	generation := h.plaza.epoch()
+	started := time.Now()
+	var generation uint64
+	if r.Method == "GET" {
+		generation = h.plaza.epoch()
+	}
 	if r.Method == "POST" {
 		login, ok := h.requireLogin(w, r)
 		if !ok {
@@ -146,8 +164,9 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 			return (store.Audit{Action: "create_room", Actor: v.OwnerID, Target: v.OwnerID}).Write(ctx, tx, v.Slug, v.ActiveSession)
 		})
 		if err == nil {
-			h.invalidateRoom(ctx, v.Slug)
-			h.plaza.remember(generation+1, v)
+			err = h.publishRoom(ctx, v, started)
+		}
+		if err == nil {
 			err = h.flush(ctx, db, v.Slug)
 		}
 		if err != nil {
@@ -202,22 +221,32 @@ func (h *ChatHandler) rooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := v.Save(ctx, a.tx)
-	if err == nil && v.RoomControls != a.room.RoomControls {
+	controlsChanged := v.RoomControls != a.room.RoomControls
+	if err == nil && controlsChanged {
 		detail, e := json.Marshal(v.RoomControls)
 		if e != nil {
 			dbError(w, e)
 			return
 		}
-		err = h.commitAudit(ctx, a.tx, store.Audit{Actor: a.actor, Action: "room_update", Detail: string(detail)}, v.Slug, v.ActiveSession)
-	} else if err == nil {
+		err = (store.Audit{Actor: a.actor, Action: "room_update", Detail: string(detail)}).Write(ctx, a.tx, v.Slug, v.ActiveSession)
+	}
+	if err == nil {
 		err = a.tx.Commit(ctx)
+	}
+	if err == nil {
+		err = h.publishRoom(ctx, v, started)
+	}
+	if err == nil && controlsChanged {
+		if db := h.db(); db != nil {
+			err = h.flush(ctx, db, v.Slug)
+		} else {
+			err = errBusinessOffline
+		}
 	}
 	if err != nil {
 		dbError(w, err)
 		return
 	}
-	h.invalidateRoom(ctx, v.Slug)
-	h.plaza.remember(generation+1, v)
 	writeJSON(w, roomView{v, "owner"})
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/httpapi"
 	"github.com/scthy/maku/internal/hub"
@@ -27,7 +28,7 @@ import (
 	"github.com/scthy/maku/internal/store"
 )
 
-func accountServer(t *testing.T, run func(*testing.T, context.Context, *gatewayHistory, *historyPool, *pubsub.Store, *http.ServeMux, *httpapi.ChatHandler, *httptest.Server)) {
+func accountServer(t *testing.T, run func(*testing.T, context.Context, *gatewayHistory, *historyPool, *pubsub.Store, *http.ServeMux, *httpapi.ChatHandler, *httptest.Server), observe ...func(*events.Bus)) {
 	t.Helper()
 	dsn, addr := os.Getenv("DANMAKU_TEST_DATABASE_URL"), os.Getenv("DANMAKU_TEST_REDIS_ADDR")
 	if dsn == "" || addr == "" {
@@ -68,6 +69,9 @@ func accountServer(t *testing.T, run func(*testing.T, context.Context, *gatewayH
 		t.Fatal(e)
 	}
 	m := hub.New(hub.Config{Filter: filter.New([]string{"replay-blocked-word"}), Producer: producer, Store: rs, RoomShards: 1, PubSubShards: 1})
+	for _, subscribe := range observe {
+		subscribe(m.Events())
+	}
 	go m.Start()
 	defer func() { drain, stop := context.WithTimeout(t.Context(), time.Second); defer stop(); m.Drain(drain) }()
 	mux := http.NewServeMux()

@@ -3,12 +3,14 @@ package hub
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"hash/maphash"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/metrics"
 	"github.com/scthy/maku/internal/mq"
@@ -23,8 +25,7 @@ type broadcastJob struct {
 }
 
 type roomStore interface {
-	FlushHeat(context.Context, []pubsub.HeatBatch) error
-	AcceptDanmaku(context.Context, protocol.DanmakuMessage, []byte) (string, string, error)
+	AcceptDanmakuPacket(context.Context, protocol.DanmakuMessage, []byte) (string, string, []byte, error)
 	Policy(context.Context, string, uint64, int) (string, error)
 	SnapshotStats(context.Context, string, map[string]int, map[string]uint64, time.Duration) (map[string]protocol.StatsData, error)
 }
@@ -41,7 +42,13 @@ type LiveBridge interface {
 	Close()
 }
 
+type SessionClock interface {
+	OffsetMS(ctx context.Context, roomID string, at time.Time) (*int64, error)
+}
+
 type Hub struct {
+	clock      SessionClock
+	bus        *events.Bus
 	liveBridge LiveBridge
 	log        *slog.Logger
 	producer   *mq.Producer
@@ -87,11 +94,10 @@ type Hub struct {
 
 	deliveryQueues []chan *broadcastJob
 
-	localHeat    map[int64]map[string]uint64
-	pendingHeat  []pubsub.HeatBatch // owned by the statistics worker until Start returns
-	statsStopped chan struct{}
-	localLikes   map[string]uint64
 	likesMu      sync.Mutex
+	localLikes   map[string]uint64
+	compatHeat   *pubsub.HeatWriter
+	statsStopped chan struct{}
 }
 
 const (
@@ -102,6 +108,8 @@ const (
 )
 
 type Config struct {
+	Bus                    *events.Bus
+	SessionClock           SessionClock
 	DisableSlowKick        bool
 	LiveBridge             LiveBridge
 	Logger                 *slog.Logger
@@ -136,10 +144,14 @@ func New(cfg Config) *Hub {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.SessionClock == nil && cfg.Store != nil {
+		cfg.SessionClock = cfg.Store
+	}
 	serverID := rand.Text()
 
 	life, cancel := context.WithCancel(context.Background())
 	m := &Hub{
+		clock:          cfg.SessionClock,
 		liveBridge:     cfg.LiveBridge,
 		log:            cfg.Logger,
 		producer:       cfg.Producer,
@@ -153,9 +165,8 @@ func New(cfg Config) *Hub {
 		drained:        make(chan struct{}),
 		register:       make(chan *Client),
 		unregister:     make(chan *Client),
-		localHeat:      make(map[int64]map[string]uint64),
-		statsStopped:   make(chan struct{}),
 		localLikes:     make(map[string]uint64),
+		statsStopped:   make(chan struct{}),
 		rooms:          make(map[string]map[*Client]struct{}),
 		ready:          make(map[string]<-chan struct{}),
 		cancelSub:      make(map[string]context.CancelFunc),
@@ -171,6 +182,15 @@ func New(cfg Config) *Hub {
 		batchWindow:     cfg.BatchWindow,
 		minBatchViewers: cfg.MinBatchViewers,
 	}
+	m.bus = cfg.Bus
+	if m.bus == nil {
+		m.bus = new(events.Bus)
+		m.compatHeat = pubsub.SubscribeHeat(m.bus, cfg.Store, cfg.Logger)
+	}
+	m.bus.Likes.Subscribe(func(_ context.Context, e events.LikeRecorded) { m.like(e.Room, e.Count) })
+	if cfg.Producer != nil {
+		cfg.Producer.Subscribe(m.bus)
+	}
 	for i := range shards {
 
 		m.deliveryQueues[i] = make(chan *broadcastJob, (broadcastJobChanSize+shards-1)/shards)
@@ -183,6 +203,9 @@ func (m *Hub) Start() {
 	defer close(m.statsStopped)
 	var stats sync.WaitGroup
 	defer stats.Wait()
+	if m.compatHeat != nil {
+		stats.Go(func() { m.drainErr = m.compatHeat.Run(m.life) })
+	}
 	m.startWorkers()
 	close(m.started)
 	statsTicker := time.NewTicker(statsInterval)
@@ -231,13 +254,28 @@ func (m *Hub) Drain(ctx context.Context) error {
 	m.publishing.Wait()
 	m.stop()
 	<-m.statsStopped
-	m.flushHeat(ctx)
+	// Ingress and the statistics worker have stopped. Persist remaining likes
+	// without refreshing the retiring gateway's online leases.
+	m.likesMu.Lock()
+	likes := m.localLikes
+	m.localLikes = nil
+	m.likesMu.Unlock()
+	if len(likes) > 0 {
+		rooms := make(map[string]int, len(likes))
+		for room := range likes {
+			rooms[room] = 0
+		}
+		_, err := m.store.SnapshotStats(ctx, m.serverID, rooms, likes, statsInterval*2+time.Second)
+		m.drainErr = errors.Join(m.drainErr, err)
+	}
 	m.closeClients()
 	if m.liveBridge != nil {
 		m.liveBridge.Close()
 	}
 	m.mux.Close()
-	m.drainErr = m.producer.Drain(ctx)
+	if m.producer != nil {
+		m.drainErr = errors.Join(m.drainErr, m.producer.Drain(ctx))
+	}
 	close(m.drained)
 	return m.drainErr
 }

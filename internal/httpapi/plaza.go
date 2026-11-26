@@ -74,6 +74,7 @@ func (g *flights[T]) do(ctx context.Context, key string, load func() (T, error))
 type plazaCache struct {
 	mu         sync.Mutex
 	generation uint64
+	lastChange time.Time
 	revision   string
 	index      map[string]cached[roomIndex]
 	details    map[string]cached[store.Room]
@@ -81,18 +82,20 @@ type plazaCache struct {
 	batches    flights[map[string]store.Room]
 }
 
-func (c *plazaCache) invalidate(slug string) {
+func (c *plazaCache) invalidate(slug string) { c.applyChange(slug, store.Room{}, time.Time{}) }
+func (c *plazaCache) applyChange(slug string, snapshot store.Room, started time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.generation++
 	clear(c.index)
 	delete(c.details, slug)
-}
-func (h *ChatHandler) invalidateRoom(ctx context.Context, slug string) {
-	if cache, ok := h.sessions.(interface{ InvalidateOBS(string) }); ok {
-		cache.InvalidateOBS(slug)
+	if snapshot.OwnerID != 0 && !started.Before(c.lastChange) {
+		c.putRoom(snapshot)
 	}
-	h.plaza.invalidate(slug)
+	c.lastChange = time.Now()
+}
+func (h *ChatHandler) invalidateRoom(ctx context.Context, slug string, snapshot store.Room, started time.Time) {
+	h.plaza.applyChange(slug, snapshot, started)
 	if err := h.sessions.BumpRoomRevision(ctx, slug); err != nil {
 		slog.Warn("Invalidate room metadata on peer gateways", "error", err)
 	}
@@ -106,6 +109,7 @@ func (c *plazaCache) observe(revision string) {
 		_, change, _ := strings.Cut(revision, ":")
 		parent, slug, ok := strings.Cut(change, ":")
 		c.revision = revision
+		c.lastChange = time.Now()
 		c.generation++
 		clear(c.index)
 		if ok && parent == previous {

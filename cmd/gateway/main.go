@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/scthy/maku/internal/commerce"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/httpapi"
 	"github.com/scthy/maku/internal/hub"
@@ -88,6 +90,16 @@ func run() (code int) {
 		log.Error("Kafka startup", "error", err)
 		return 1
 	}
+	defer func() {
+		op, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := producer.Drain(op); err != nil {
+			log.Error("Drain Kafka", "error", err)
+			code = 1
+		}
+	}()
+	bus := new(events.Bus)
+	producer.Subscribe(bus)
 	var bridge hub.LiveBridge
 	if *bridgeEnabled {
 		bridge = livebridge.New(livebridge.Config{Logger: log})
@@ -96,8 +108,9 @@ func run() (code int) {
 		LiveBridge:             bridge,
 		DisableSlowKick:        *disableKick,
 		Logger:                 log,
-		Producer:               producer,
+		Bus:                    bus,
 		Store:                  sessions,
+		SessionClock:           sessions,
 		Metrics:                telemetry,
 		Filter:                 words,
 		MaskWords:              *mode == "mask",
@@ -110,13 +123,26 @@ func run() (code int) {
 		MinBatchViewers:        *minViewers,
 	})
 
+	heat := pubsub.SubscribeHeat(bus, sessions, log)
 	r := http.NewServeMux()
-	handler := httpapi.NewChatHandler(history, m, sessions, *allowDev)
+	handler := httpapi.NewChatHandlerWithBus(history, m, sessions, *allowDev, bus)
+	handler.SubscribeInterests()
+	handler.SubscribeCaches()
 	// Keep collecting through migration and drain before closing Redis.
 	profileCtx, stopProfiles := context.WithCancel(context.WithoutCancel(ctx))
 	profilesDone := make(chan struct{})
 	go func() { defer close(profilesDone); handler.RunInterestWriter(profileCtx) }()
-	defer func() { stopProfiles(); <-profilesDone }()
+	heatDone := make(chan error, 1)
+	go func() { heatDone <- heat.Run(profileCtx) }()
+	defer func() {
+		stopProfiles()
+		<-profilesDone
+		if err := <-heatDone; err != nil {
+			log.Error("Drain heat", "error", err)
+			code = 1
+		}
+	}()
+	defer bus.Close()
 	handler.SetRecommendations(recommend.Default())
 	handler.SetCommerce(plugins)
 	go m.Start()
@@ -147,7 +173,21 @@ func run() (code int) {
 	r.HandleFunc("GET /livez", func(w http.ResponseWriter, req *http.Request) { w.WriteHeader(200) })
 	r.HandleFunc("GET /readyz", readiness(func() bool { return m.Retiring() || !keysReady.Load() }, sessions.Ping))
 	r.Handle("GET /metrics", telemetry.Handler())
-	srv := http.Server{Addr: net.JoinHostPort(*host, *port), Handler: httpapi.Recover(log, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	requestCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRequests()
+	var requests sync.WaitGroup
+	var admission sync.Mutex
+	accepting := true
+	srv := http.Server{BaseContext: func(net.Listener) context.Context { return requestCtx }, Addr: net.JoinHostPort(*host, *port), Handler: httpapi.Recover(log, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		admission.Lock()
+		if !accepting {
+			admission.Unlock()
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		requests.Add(1)
+		admission.Unlock()
+		defer requests.Done()
 		if !keysReady.Load() && strings.HasPrefix(req.URL.Path, "/api/rooms/") && !strings.HasSuffix(req.URL.Path, "/history") {
 			w.WriteHeader(503)
 			return
@@ -184,16 +224,29 @@ func run() (code int) {
 		m.Migrate(migration, *migrationBatch, *migrationLimit, 100*time.Millisecond)
 		finish()
 	}
+	admission.Lock()
+	accepting = false
+	admission.Unlock()
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdown); err != nil {
 		log.Error("HTTP shutdown", "error", err)
 		code = 1
 	}
-	if err := m.Drain(shutdown); err != nil {
-		log.Error("Drain timed out", "error", err)
-		return 1
+	cancelRequests()
+	if shutdown.Err() != nil {
+		if err := srv.Close(); err != nil {
+			log.Error("Close HTTP", "error", err)
+			code = 1
+		}
 	}
+	drain, endDrain := context.WithTimeout(context.Background(), 5*time.Second)
+	defer endDrain()
+	if err := m.Drain(drain); err != nil {
+		log.Error("Drain timed out", "error", err)
+		code = 1
+	}
+	requests.Wait()
 	return code
 }
 

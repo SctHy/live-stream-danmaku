@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
 )
 
@@ -189,7 +190,7 @@ func (h *ChatHandler) replays(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if uid, err := h.viewer(r); err == nil {
-			h.recordInterest(uid, room, 1)
+			h.bus.Views.Publish(r.Context(), events.RoomViewed{Room: room, UserID: uid})
 		}
 		v.Chunk = 60000
 		writeJSON(w, v)
@@ -242,12 +243,14 @@ func (h *ChatHandler) deleteReplay(w http.ResponseWriter, r *http.Request, id in
 		return
 	}
 	if path != "" {
-		name, err := videoName(path)
+		var name string
+		name, err = videoName(path)
 		if err != nil {
 			w.WriteHeader(400)
 			return
 		}
-		root, err := os.OpenRoot(replayRoot())
+		var root *os.Root
+		root, err = os.OpenRoot(replayRoot())
 		if err != nil {
 			dbError(w, err)
 			return
@@ -272,7 +275,10 @@ func (h *ChatHandler) deleteReplay(w http.ResponseWriter, r *http.Request, id in
 			// Serialize unlink with concurrent retries. A retry that finds the
 			// record gone must not touch a filename reused by a later replay.
 			tag, err := tx.Exec(ctx, "DELETE FROM room_replays WHERE id=$1 AND status='failed' AND video_path=$2", id, path)
-			if err != nil || tag.RowsAffected() == 0 {
+			if err == nil && tag.RowsAffected() == 0 {
+				return pgx.ErrNoRows
+			}
+			if err != nil {
 				return err
 			}
 			err = root.Remove(name)
@@ -291,6 +297,7 @@ func (h *ChatHandler) deleteReplay(w http.ResponseWriter, r *http.Request, id in
 		dbError(w, err)
 		return
 	}
+	h.bus.ReplayRemovals.Publish(ctx, events.ReplayRemoved{ID: id})
 	w.WriteHeader(204)
 }
 
@@ -358,7 +365,7 @@ func (h *ChatHandler) timeline(w http.ResponseWriter, r *http.Request) {
 			dbError(w, err)
 			return
 		}
-		h.recordInterest(login.UserID, slug, 2)
+		h.bus.ReplayComments.Publish(r.Context(), events.ReplayCommented{Room: slug, UserID: login.UserID})
 		writeJSON(w, v)
 		return
 	}

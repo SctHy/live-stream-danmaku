@@ -92,7 +92,7 @@ func TestRealtimeDuringHistoryOutage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := hub.New(hub.Config{Producer: producer, Store: sessions, PubSubShards: 1, RoomShards: 1})
+	m := hub.New(hub.Config{Producer: producer, Store: sessions, SessionClock: sessions, PubSubShards: 1, RoomShards: 1})
 	go m.Start()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

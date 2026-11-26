@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/metrics"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
@@ -35,6 +36,9 @@ func NewProducer(brokers []string, log *slog.Logger, metrics *metrics.GatewayMet
 		return nil, err
 	}
 	return &Producer{client: cl, log: log, metrics: metrics}, nil
+}
+func (p *Producer) Subscribe(bus *events.Bus) {
+	bus.Danmaku.Subscribe(func(_ context.Context, e events.DanmakuAccepted) { p.Publish(e.Room, e.Wire()) })
 }
 func (p *Producer) Publish(room string, data []byte) {
 	p.client.TryProduce(context.Background(), &kgo.Record{Topic: topic, Key: []byte(room), Value: data}, func(_ *kgo.Record, err error) {

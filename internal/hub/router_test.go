@@ -3,7 +3,10 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/scthy/maku/internal/filter"
 	"github.com/scthy/maku/internal/protocol"
@@ -25,9 +28,9 @@ type captureStore struct {
 	msg protocol.DanmakuMessage
 }
 
-func (s *captureStore) AcceptDanmaku(_ context.Context, msg protocol.DanmakuMessage, wire []byte) (string, string, error) {
+func (s *captureStore) AcceptDanmakuPacket(_ context.Context, msg protocol.DanmakuMessage, wire []byte) (string, string, []byte, error) {
 	s.msg = msg
-	return "accepted", msg.EventID, nil
+	return "accepted", msg.EventID, nil, nil
 }
 func TestFilterAndDraining(t *testing.T) {
 	for _, tc := range []struct {
@@ -51,5 +54,44 @@ func TestFilterAndDraining(t *testing.T) {
 				t.Fatal(receipt, store.msg)
 			}
 		})
+	}
+}
+
+type clockFunc func(context.Context, string, time.Time) (*int64, error)
+
+func (f clockFunc) OffsetMS(ctx context.Context, room string, at time.Time) (*int64, error) {
+	return f(ctx, room, at)
+}
+
+func TestSessionClockOnAdmission(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		store := &captureStore{}
+		offset := int64(321)
+		var calledAt time.Time
+		clock := clockFunc(func(_ context.Context, room string, at time.Time) (*int64, error) {
+			if room != "room/session" {
+				t.Fatal(room)
+			}
+			calledAt = at
+			if fail {
+				return &offset, errors.New("clock offline")
+			}
+			return &offset, nil
+		})
+		h := Hub{life: t.Context(), clock: clock, log: slog.Default(), store: store, sendCapacity: 1}
+		c := h.NewClient(7, "room/session", nil)
+		h.handleDanmaku(c, []byte(`{"content":"hello"}`))
+		if calledAt.IsZero() || calledAt != store.msg.SendTime || store.msg.Content != "hello" {
+			t.Fatal(store.msg)
+		}
+		got := store.msg.VideoOffsetMS
+		if fail && got != nil || !fail && (got == nil || *got != offset) {
+			t.Fatal(got)
+		}
+		packets, err := protocol.DecodePackets((<-c.send).payload)
+		var receipt protocol.Receipt
+		if err != nil || len(packets) != 1 || json.Unmarshal(packets[0].Data, &receipt) != nil || receipt.Status != "accepted" {
+			t.Fatal(receipt, err)
+		}
 	}
 }

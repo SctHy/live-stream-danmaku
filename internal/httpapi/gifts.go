@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/scthy/maku/internal/commerce"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/store"
 )
@@ -130,7 +131,7 @@ func (h *ChatHandler) gifts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !duplicate {
-		h.recordInterest(login.UserID, r.PathValue("room"), 5)
+		h.bus.Gifts.Publish(ctx, events.GiftOrdered{Room: g.RoomSlug, UserID: g.SenderID, OrderID: g.ID})
 	}
 	if err = h.flushGifts(ctx, db, g.RoomID); err != nil {
 		dbError(w, err)
@@ -178,38 +179,4 @@ func (h *ChatHandler) leaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"contributors": top})
-}
-func (h *ChatHandler) analytics(w http.ResponseWriter, r *http.Request) {
-	a, ok := h.access(w, r, bearer(r))
-	if !ok {
-		return
-	}
-	ctx := r.Context()
-	defer a.tx.Rollback(ctx)
-	if a.role == "viewer" {
-		w.WriteHeader(403)
-		return
-	}
-	room := roomID(r)
-	var count, senders, withdrawals, audits, orders, cost int64
-	err := a.tx.QueryRow(ctx, `SELECT count(*) FILTER(WHERE w.event_id IS NULL),count(DISTINCT m.user_id) FILTER(WHERE w.event_id IS NULL),
- (SELECT count(*) FROM danmaku_withdrawals WHERE room_id=$1),
- (SELECT count(*) FROM moderation_audits WHERE room_id=$2 AND session_slug=$3),
- (SELECT count(*) FROM gift_orders WHERE room_id=$1),(SELECT coalesce(sum(total_cost),0) FROM gift_orders WHERE room_id=$1)
- FROM danmaku_messages m LEFT JOIN danmaku_withdrawals w ON m.room_id=w.room_id AND m.event_id=w.event_id WHERE m.room_id=$1`, room, a.room.Slug, r.PathValue("session")).Scan(&count, &senders, &withdrawals, &audits, &orders, &cost)
-	if err != nil {
-		dbError(w, err)
-		return
-	}
-	online, peak, err := h.sessions.Attendance(ctx, room)
-	if err != nil {
-		dbError(w, err)
-		return
-	}
-	top, err := h.sessions.Contributors(ctx, room, 5)
-	if err != nil {
-		dbError(w, err)
-		return
-	}
-	writeJSON(w, map[string]any{"online": online, "peak_online": peak, "danmaku_count": count, "active_senders": senders, "withdrawn_count": withdrawals, "moderation_count": audits, "gift_order_count": orders, "gift_total_cost": cost, "top_contributors": top})
 }

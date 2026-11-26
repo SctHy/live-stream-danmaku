@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
 	"github.com/scthy/maku/internal/store"
@@ -198,6 +199,7 @@ func (h *ChatHandler) streamHook(w http.ResponseWriter, r *http.Request) {
 	}
 	var active pubsub.OBSStream
 	var ended endedReplay
+	var stateChanged bool
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		room, err := store.LoadRoom(ctx, tx, in.Room, true)
 		if err != nil {
@@ -215,6 +217,7 @@ func (h *ChatHandler) streamHook(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		stateChanged = true
 		_, err = tx.Exec(ctx, "UPDATE rooms SET active_session=$2,status=$3,stream_mode='obs',updated_at=now() WHERE slug=$1", in.Room, room.ActiveSession, room.Status)
 		if err != nil {
 			return err
@@ -232,7 +235,13 @@ func (h *ChatHandler) streamHook(w http.ResponseWriter, r *http.Request) {
 		return audit.Write(ctx, tx, in.Room, room.ActiveSession)
 	})
 	if err == nil {
-		h.invalidateRoom(ctx, in.Room)
+		if stateChanged {
+			id := active.ReplayID
+			if !ready {
+				id = ended.ID
+			}
+			h.bus.OBS.Publish(ctx, events.OBSStreamChanged{Room: in.Room, Live: ready, ReplayID: id})
+		}
 		err = h.flush(ctx, db, in.Room)
 	}
 	if err != nil {
@@ -337,4 +346,22 @@ func (h *ChatHandler) stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"mode": mode, "live": result.Live, "sources": result.Sources})
+}
+
+func (h *ChatHandler) applyOBSState(ctx context.Context, slug, detail string) (obsEvent, error) {
+	var v obsEvent
+	if err := json.Unmarshal([]byte(detail), &v); err != nil {
+		return v, err
+	}
+	cache, ok := h.sessions.(obsStore)
+	if !ok {
+		return v, errors.New("OBS store unavailable")
+	}
+	if err := cache.SetOBS(ctx, slug, v.Stream); err != nil {
+		return v, err
+	}
+	if err := h.sessions.SetControls(ctx, slug, v.RoomControls); err != nil {
+		return v, err
+	}
+	return v, nil
 }

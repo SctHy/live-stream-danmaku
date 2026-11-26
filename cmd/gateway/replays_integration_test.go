@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/httpapi"
 	"github.com/scthy/maku/internal/mq"
 	"github.com/scthy/maku/internal/protocol"
@@ -31,6 +32,7 @@ func TestOBSReplayLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("REPLAY_STORAGE_DIR", dir)
 	t.Setenv("STREAM_WEBHOOK_SECRET", "test-webhook")
+	var removed []int64
 	accountServer(t, func(t *testing.T, ctx context.Context, h *gatewayHistory, pool *historyPool, rs *pubsub.Store, mux *http.ServeMux, handler *httpapi.ChatHandler, server *httptest.Server) {
 		repo := store.NewMessageRepo(pool.db)
 		consumer, stop := context.WithCancel(ctx)
@@ -257,7 +259,36 @@ func TestOBSReplayLifecycle(t *testing.T) {
 		if stopped["status"] != "failed" || stopped["replay_id"] != newer["replay_id"] {
 			t.Fatal("missing recording", stopped)
 		}
+		// A non-empty directory forces unlink to fail after the failed-state commit.
+		file := filepath.Join(dir, "video.mp4")
+		if err := os.Remove(file); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(file, 0700); err != nil {
+			t.Fatal(err)
+		}
+		child := filepath.Join(file, "child")
+		if err := os.WriteFile(child, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		call("DELETE", path, "", 503)
+		if len(removed) != 0 {
+			t.Fatal(removed)
+		}
+		if err := os.Remove(child); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(file); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
 		call("DELETE", path, "", 204)
+		call("DELETE", base+fmt.Sprintf("/replays/%.0f", newer["replay_id"]), "", 204)
+		if len(removed) != 2 || removed[0] != int64(active["replay_id"].(float64)) || removed[1] != int64(newer["replay_id"].(float64)) {
+			t.Fatal(removed)
+		}
 
 		if _, err = os.Stat(filepath.Join(dir, "video.mp4")); !os.IsNotExist(err) {
 			t.Fatal("video still present", err)
@@ -266,5 +297,7 @@ func TestOBSReplayLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		call("GET", "/api/replays/"+id+"/video", "", 404)
+	}, func(bus *events.Bus) {
+		bus.ReplayRemovals.Subscribe(func(_ context.Context, e events.ReplayRemoved) { removed = append(removed, e.ID) })
 	})
 }

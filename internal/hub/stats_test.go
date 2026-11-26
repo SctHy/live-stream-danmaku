@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"slices"
 	"testing"
 	"time"
 
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
 )
@@ -27,7 +27,8 @@ func (s partialStatsStore) SnapshotStats(ctx context.Context, _ string, _ map[st
 }
 
 func TestStatsRequeuesUnconfirmedLikes(t *testing.T) {
-	h := &Hub{life: t.Context(), log: slog.New(slog.DiscardHandler), localLikes: map[string]uint64{"written": 2, "pending": 3}}
+	h := &Hub{life: t.Context(), log: slog.New(slog.DiscardHandler)}
+	h.localLikes = map[string]uint64{"written": 2, "pending": 3}
 	h.store = partialStatsStore{hub: h}
 	h.broadcastStats()
 	if len(h.localLikes) != 1 || h.localLikes["pending"] != 4 {
@@ -35,30 +36,33 @@ func TestStatsRequeuesUnconfirmedLikes(t *testing.T) {
 	}
 }
 
-type heatRecorder struct {
+type finalLikesStore struct {
 	roomStore
-	batches [][]pubsub.HeatBatch
+	flushing, resume chan struct{}
+	count            uint64
 }
 
-func (s *heatRecorder) FlushHeat(_ context.Context, b []pubsub.HeatBatch) error {
-	s.batches = append(s.batches, slices.Clone(b))
-	if len(s.batches) == 1 {
-		return errors.New("lost acknowledgement")
-	}
-	return nil
+func (s *finalLikesStore) SnapshotStats(_ context.Context, _ string, _ map[string]int, likes map[string]uint64, _ time.Duration) (map[string]protocol.StatsData, error) {
+	close(s.flushing)
+	<-s.resume
+	s.count = likes["r"]
+	return nil, nil
 }
-func TestFlushHeatRetriesSameBatch(t *testing.T) {
-	s := new(heatRecorder)
-	minute := time.Now().Unix() / 60
-	h := Hub{log: slog.New(slog.DiscardHandler), store: s, localHeat: map[int64]map[string]uint64{minute: {"room": 3}}}
-	h.flushHeat(t.Context())
-	h.localHeat[minute] = map[string]uint64{"room": 2}
-	h.flushHeat(t.Context())
-	if len(h.pendingHeat) != 0 || len(s.batches) != 2 || len(s.batches[1]) != 2 {
-		t.Fatal(s.batches)
-	}
-	old, next := s.batches[1][0], s.batches[1][1]
-	if old.ID != s.batches[0][0].ID || old.Rooms["room"] != 3 || next.ID == old.ID || next.Rooms["room"] != 2 {
-		t.Fatal(s.batches)
+func TestDrainFreezesSharedBusLikes(t *testing.T) {
+	s := &finalLikesStore{flushing: make(chan struct{}), resume: make(chan struct{})}
+	life, stop := context.WithCancel(t.Context())
+	h := &Hub{life: life, stop: stop, store: s, mux: &pubsub.Mux{}, started: make(chan struct{}), drained: make(chan struct{}), statsStopped: make(chan struct{}), localLikes: map[string]uint64{}, log: slog.Default()}
+	var bus events.Bus
+	bus.Likes.Subscribe(func(_ context.Context, e events.LikeRecorded) { h.like(e.Room, e.Count) })
+	send := func() { bus.Likes.Publish(t.Context(), events.LikeRecorded{Room: "r", Count: 1}) }
+	go h.Start()
+	send()
+	done := make(chan error, 1)
+	go func() { done <- h.Drain(t.Context()) }()
+	<-s.flushing
+	send()
+	close(s.resume)
+	if err := <-done; err != nil || s.count != 1 {
+		t.Fatal(s.count, err)
 	}
 }

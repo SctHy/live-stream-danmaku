@@ -57,7 +57,7 @@ func TestUpgradeLegacySession(t *testing.T) {
 		uid  uint64
 		want string
 	}{{7, "accepted"}, {12, "muted"}} {
-		msg := protocol.DanmakuMessage{UserID: tc.uid, RoomID: room, ClientMsgID: "retry"}
+		msg := protocol.DanmakuMessage{UserID: tc.uid, RoomID: room, ClientMsgID: "retry", EventID: rand.Text()}
 		status, _, err := s.AcceptDanmaku(ctx, msg, []byte("{}"))
 		if err != nil || status != tc.want {
 			t.Fatal(status, err)

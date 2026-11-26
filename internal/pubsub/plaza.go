@@ -19,9 +19,9 @@ redis.call('ZINCRBY',KEYS[1],ARGV[2],ARGV[1])
 return redis.call('EXPIRE',KEYS[1],900)`)
 
 type HeatBatch struct {
-	Minute int64
-	ID     string
-	Rooms  map[string]uint64
+	Minute     int64
+	ID         string
+	RoomFifths map[string]uint64 // one like is one fifth of a heat point
 }
 
 var flushHeat = redis.NewScript(`
@@ -34,9 +34,9 @@ return redis.call('EXPIRE',KEYS[1],900)`)
 func (s *Store) FlushHeat(ctx context.Context, batches []HeatBatch) error {
 	p := s.r.Pipeline()
 	for _, b := range batches {
-		args := make([]any, 0, 2*len(b.Rooms))
-		for room, count := range b.Rooms {
-			args = append(args, room, count)
+		args := make([]any, 0, 2*len(b.RoomFifths))
+		for room, count := range b.RoomFifths {
+			args = append(args, room, float64(count)/5)
 		}
 		flushHeat.Eval(ctx, p, []string{minuteKey(time.Unix(b.Minute*60, 0)), "dm:{hot}:batch:" + b.ID}, args...)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/store"
 )
@@ -112,18 +113,8 @@ func (h *ChatHandler) deliver(ctx context.Context, slug string, a pendingAudit) 
 	kind := protocol.TypeRoomState
 	switch a.Action {
 	case "obs_state":
-		var v obsEvent
-		if err := json.Unmarshal([]byte(a.Detail), &v); err != nil {
-			return err
-		}
-		cache, ok := h.sessions.(obsStore)
-		if !ok {
-			return errors.New("OBS store unavailable")
-		}
-		if err := cache.SetOBS(ctx, slug, v.Stream); err != nil {
-			return err
-		}
-		if err := h.sessions.SetControls(ctx, slug, v.RoomControls); err != nil {
+		v, err := h.applyOBSState(ctx, slug, a.Detail)
+		if err != nil {
 			return err
 		}
 		data = v
@@ -175,6 +166,12 @@ func (h *ChatHandler) commitAudit(ctx context.Context, tx pgx.Tx, v store.Audit,
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
+	}
+	switch v.Action {
+	case "withdraw":
+		h.bus.Withdrawals.Publish(ctx, events.DanmakuWithdrawn{Room: room + "/" + session, EventID: v.Event})
+	case "notice", "slow_mode", "mute_all":
+		h.bus.Rooms.Publish(ctx, events.RoomStateChanged{Room: room})
 	}
 	if session == "" {
 		return nil

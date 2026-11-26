@@ -42,18 +42,9 @@ func (s *Store) SnapshotStats(ctx context.Context, server string, rooms map[stri
 	}
 	cmds, execErr := p.Exec(ctx)
 	// Remove acknowledged increments so callers only requeue unconfirmed likes.
-	bucket := minuteKey(time.Now())
 	for room, cmd := range increments {
 		if cmd.Err() == nil {
-			slug, _, _ := strings.Cut(room, "/")
-			p.ZIncrBy(ctx, bucket, float64(likes[room])*0.2, slug)
 			delete(likes, room)
-		}
-	}
-	if p.Len() > 0 {
-		p.Expire(ctx, bucket, 15*time.Minute)
-		if _, err := p.Exec(ctx); err != nil {
-			return nil, err
 		}
 	}
 	for _, cmd := range cmds {

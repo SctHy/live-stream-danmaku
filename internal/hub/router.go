@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
+	"net"
 	"strings"
 	"time"
 
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
-	"github.com/scthy/maku/internal/pubsub"
 )
 
 func (m *Hub) reply(c *Client, id, status string) {
@@ -81,22 +83,12 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		return
 	}
 	msg := protocol.DanmakuMessage{Color: input.Color, Mode: input.Mode, Nickname: c.nickname, EventID: rand.Text(), RoomID: c.RoomID, UserID: c.UserID, Content: input.Content, SendTime: time.Now(), ClientMsgID: input.ClientMsgID}
-	room, session, _ := strings.Cut(c.RoomID, "/")
-	if strings.HasPrefix(session, "obs-") {
-		if obs, ok := m.store.(interface {
-			OBS(context.Context, string) (pubsub.OBSStream, error)
-		}); ok {
-			ctx, cancel := context.WithTimeout(m.life, 500*time.Millisecond)
-			active, err := obs.OBS(ctx, room)
-			cancel()
-			if err != nil {
-				m.reply(c, input.ClientMsgID, "unavailable")
-				return
-			}
-			if active.RoomID == c.RoomID {
-				offset := max(int64(0), msg.SendTime.UnixMilli()-active.Started)
-				msg.VideoOffsetMS = &offset
-			}
+	if m.clock != nil {
+		offset, err := m.clock.OffsetMS(m.life, c.RoomID, msg.SendTime)
+		if err != nil {
+			m.log.Warn("Session clock unavailable", "error", err)
+		} else {
+			msg.VideoOffsetMS = offset
 		}
 	}
 	body, err := json.Marshal(msg)
@@ -122,22 +114,25 @@ func (m *Hub) handleDanmaku(c *Client, data []byte) {
 		m.log.Error("Encode WebSocket packet", "error", err)
 		return
 	}
-	status, eventID, err := m.store.AcceptDanmaku(ctx, msg, wire)
+	status, eventID, original, err := m.store.AcceptDanmakuPacket(ctx, msg, wire)
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() && m.life.Err() == nil {
+		m.log.Warn("Retry Redis publication after timeout", "error", err)
+		retry, stopRetry := context.WithTimeout(m.life, 2*time.Second)
+		status, eventID, original, err = m.store.AcceptDanmakuPacket(retry, msg, wire)
+		stopRetry()
+	}
 	if err != nil {
 		m.log.Warn("Redis publication failed", "error", err)
 	}
-	if status == "new" {
-		m.likesMu.Lock()
-		minute := msg.SendTime.Unix() / 60
-		if m.localHeat[minute] == nil {
-			m.localHeat[minute] = make(map[string]uint64)
+	if status == "new" || status == "accepted" && original != nil {
+		duplicate := status == "accepted"
+		if duplicate {
+			wire = original
 		}
-		m.localHeat[minute][room]++
-		m.likesMu.Unlock()
-		m.producer.Publish(c.RoomID, wire)
-		if c.Interest != nil {
-			c.Interest(2)
-		}
+		event := events.Accepted(c.RoomID, c.UserID, msg.SendTime, eventID, wire)
+		event.Duplicate = duplicate
+		m.bus.Danmaku.Publish(m.life, event)
 		status = "accepted"
 	}
 	m.receipt(c, input.ClientMsgID, status, eventID)
@@ -153,12 +148,15 @@ func (m *Hub) handleLike(c *Client, data []byte) {
 	if !m.permitted(c, protocol.TypeLike, "") {
 		return
 	}
-	m.likesMu.Lock()
-	m.localLikes[c.RoomID] += like.Count
-	m.likesMu.Unlock()
-	if c.Interest != nil {
-		c.Interest(1)
+	m.ingress.Lock()
+	if m.draining {
+		m.ingress.Unlock()
+		return
 	}
+	m.publishing.Add(1)
+	m.ingress.Unlock()
+	defer m.publishing.Done()
+	m.bus.Likes.Publish(m.life, events.LikeRecorded{At: time.Now(), Room: c.RoomID, UserID: c.UserID, Count: like.Count})
 }
 
 func (m *Hub) FilterMessage(content string) (string, bool) {

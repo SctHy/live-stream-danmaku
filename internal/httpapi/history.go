@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/store"
 )
@@ -133,6 +134,9 @@ func (h *ChatHandler) moderate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			err = h.sessions.Journal(ctx, room, packet)
+			if err == nil {
+				h.bus.Withdrawals.Publish(ctx, events.DanmakuWithdrawn{Room: room, EventID: in.EventID})
+			}
 		}
 	case "mute_all", "slow_mode", "notice":
 		if a.tx == nil {

@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"github.com/scthy/maku/internal/commerce"
+	"github.com/scthy/maku/internal/events"
 	"github.com/scthy/maku/internal/hub"
 	"github.com/scthy/maku/internal/protocol"
 	"github.com/scthy/maku/internal/pubsub"
@@ -57,6 +58,7 @@ type sessionStore interface {
 	RefreshLogin(context.Context, string, pubsub.Login) error
 }
 type ChatHandler struct {
+	bus             *events.Bus
 	videos          ttlcache.Cache[int64, replayFile]
 	recommendations *recommend.Registry
 	interests       interestBuffer
@@ -70,8 +72,19 @@ type ChatHandler struct {
 }
 
 func NewChatHandler(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool) *ChatHandler {
-	plugins := commerce.DefaultPlugins()
-	return &ChatHandler{recommendations: recommend.Default(), interests: newInterestBuffer(), plugins: plugins, liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
+	bus := new(events.Bus)
+	if m != nil {
+		bus = m.Events()
+	}
+	h := NewChatHandlerWithBus(history, m, sessions, allowDev, bus)
+	h.SubscribeInterests()
+	h.SubscribeCaches()
+	return h
+}
+
+// NewChatHandlerWithBus leaves read-model subscriptions to the gateway.
+func NewChatHandlerWithBus(history HistoryStore, m *hub.Hub, sessions sessionStore, allowDev bool, bus *events.Bus) *ChatHandler {
+	return &ChatHandler{bus: bus, recommendations: recommend.Default(), interests: newInterestBuffer(), plugins: commerce.DefaultPlugins(), liveResolver: newLiveResolver("https://api.live.bilibili.com", nil), history: history, manager: m, sessions: sessions, allowDev: allowDev}
 }
 
 func (h *ChatHandler) SetRecommendations(r *recommend.Registry) { h.recommendations = r }
@@ -254,8 +267,7 @@ func (h *ChatHandler) connect(w http.ResponseWriter, r *http.Request, uid uint64
 	}
 
 	roomSlug := r.PathValue("room")
-	client.Interest = func(weight int) { h.recordInterest(uid, roomSlug, weight) }
-	client.Interest(1)
+	h.bus.Views.Publish(r.Context(), events.RoomViewed{Room: roomSlug, UserID: uid})
 	go client.WritePump()
 	client.ReadPump(h.manager)
 }
